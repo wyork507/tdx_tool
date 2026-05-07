@@ -1,6 +1,10 @@
+# Dependencies
 from logging import Logger
+from requests import post
+from datetime import datetime
 import logging
-
+# Local imports
+from .utils import TDX_AUTH
 
 class tdx_auth:
     """
@@ -39,15 +43,12 @@ class tdx_auth:
     
     @property
     def _timenow(self) -> float:
-        from datetime import datetime
         return datetime.now().timestamp()
 
     def update_token(self) -> str:
         """
         Retrieve a new token from user id and key
         """
-        from .utils import TDX_AUTH
-        import requests
         # Request a new token
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -58,7 +59,7 @@ class tdx_auth:
             "client_secret": self.client_key
         }
 
-        response = requests.post(TDX_AUTH, data=data, headers=headers, timeout=10)
+        response = post(TDX_AUTH, data=data, headers=headers, timeout=10)
         response.raise_for_status()
         token_data = response.json()
         self._expire_time = self._timenow + token_data["expires_in"] - 60
@@ -68,7 +69,7 @@ class tdx_auth:
     @property
     def token(self) -> str:
         if self._timenow > self._expire_time:
-            self.logger.debug("Token expired, fetching a new one")
+            self.logger.debug("Token expired, fetching a new one and updating cache")
             self._token = self.update_token()
         self.logger.debug("Take token from cache")
         return self._token

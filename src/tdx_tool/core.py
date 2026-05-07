@@ -53,9 +53,12 @@ class tdx_tool:
     
     @default_coor.setter
     def default_coor(self, value: str) -> None:
-        if not isinstance(value, str):
-            self.logger.error(f"Invalid value for default_coor: {value}. Must be a string.")
-            raise ValueError("default_coor must be a string value representing a coordinate reference system (e.g., 'EPSG:4326').")
+        import pyproj
+        try:
+            pyproj.CRS(value) # Make sure the provided CRS string is valid
+        except pyproj.exceptions.CRSError as e:
+            self.logger.error(f"Invalid coordinate reference system: {value}. Error: {e}")
+            raise ValueError(f"Invalid coordinate reference system: {value}. Please provide a valid CRS string (e.g., 'EPSG:4326').")
         self._default_coor = value
         self.logger.info(f"Set default_coor to {value}")
 
@@ -71,13 +74,63 @@ class tdx_tool:
             response.raise_for_status()
             return response
         except requests.RequestException as e:
-            if counter > 0:
-                self.logger.debug(f"Failed due to: {e}. Waiting for 1 second before retrying...")
-                time.sleep(1)
-                self.logger.info(f"Retrying... ({counter} attempts left)")
-                return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
-            self.logger.error(f"Error occurred while fetching data from {url}:\n\t{e}")
-            raise
+            match getattr(e.response, 'status_code', None):
+                case 401: # Unauthorized - likely token expired
+                    self.logger.debug("Received 401 Unauthorized. Attempting to refresh token and retry...")
+                    self.auth.update_token() # Refresh token
+                    return self._get_data_from_suffix_url(suffix_url, params, counter) # Retry immediately after refreshing token
+                case 429: # Too Many Requests - rate limit exceeded
+                    if counter > 0:
+                        wait_time: int = 4**(-counter+2) # Exponential backoff: 16, 4, 1 seconds
+                        self.logger.debug(f"Received 429 Too Many Requests. Waiting for {wait_time} seconds before retrying...")
+                        time.sleep(wait_time)
+                        self.logger.debug(f"Retrying ... ({counter} attempts left)")
+                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
+                    else:
+                        self.logger.error(f"Due to repeated 429 Too Many Requests, no more retries will be attempted for URL: {url}")
+                        raise
+                case _:
+                    if counter > 0: # For other types of errors, we can attempt a retry with a short delay
+                        self.logger.debug(f"Failed due to: {e}. Waiting for 1 second before retrying...")
+                        time.sleep(1)
+                        self.logger.info(f"Retrying... ({counter} attempts left)")
+                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
+                    self.logger.error(f"Error occurred while fetching data from {url}:\n\t{e}")
+                    raise
+    
+    def _fetch_combined_data(
+        self,
+        prefix: str,
+        params: dict,
+        decoder: callable[[Response], list[ms.Struct]],
+        parser: Optional[callable[[ms.Struct], pd.DataFrame]] = None
+    ) -> list[ms.Struct] | pd.DataFrame:
+        """
+        Fetch data from the API for the specified endpoint template and parameters.
+
+        Parameters
+        ----------
+        prefix : A string template for the API endpoint, with a placeholder for the middle part
+            example: `v2/Bus/Route`
+        params : A dictionary of query parameters to include in the API request
+        decoder : A function to decode the API response into a pandas DataFrame
+        """
+        data = []
+        for middle_part in self._url_middle_part():
+            suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
+            self.logger.debug(f"Fetching data from URL: {suffix_url}")
+            response = self._get_data_from_suffix_url(suffix_url, params=params)
+            data.extend(decoder(response))
+        
+        if parser is None:
+            return data
+        else:
+            dfs = [parser(d) for d in data]
+            if len(dfs) > 1:
+                self.logger.debug("Combining data from multiple regions due to ambiguous region name.")
+                return pd.concat(dfs, ignore_index=True)
+            else:
+                return dfs[0]
 
     def _save_to_file(
         self,

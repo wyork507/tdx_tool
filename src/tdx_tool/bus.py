@@ -2,9 +2,12 @@
 from functools import cached_property, cache
 from logging import Logger
 from typing import Literal, Optional
+from requests import Response
 import logging, msgspec
 import pandas as pd
 import geopandas as gpd
+import shapely
+import requests
 
 # Local imports
 from .core import tdx_tool
@@ -15,6 +18,10 @@ class tdx_bus(tdx_tool):
     """
 
     """
+    class Operator(msgspec.Struct):
+        OperatorID: str
+        OperatorName: I18n
+
     class SubRoute(msgspec.Struct):
         SubRouteUID: str
         SubRouteID: str
@@ -32,6 +39,7 @@ class tdx_bus(tdx_tool):
         RouteUID: str
         BusRouteType: int
         RouteName: I18n
+        Operators: list[Operator] = []
         UpdateTime: str
         VersionID: int
         DepartureStopNameZh: Optional[str] = None
@@ -66,10 +74,6 @@ class tdx_bus(tdx_tool):
         LocationCityCode: Optional[str] = None
         Bearing: Optional[str] = None
         UpdateTime: Optional[str] = None
-    
-    class Operator(msgspec.Struct):
-        OperatorID: str
-        OperatorName: I18n
 
     class RouteStops(msgspec.Struct):
         RouteUID: str
@@ -77,11 +81,20 @@ class tdx_bus(tdx_tool):
         RouteName: I18n
         SubRouteName: I18n
         Stops: list[Stop] # type: ignore
-        OpratiorIDs: list[Operator] # type: ignore
+        OperatorIDs: list[Operator] # type: ignore
         Direction: int
         City: str
         CityCode: str
-        UpdateTime: str
+        UpdateTime: Optional[str] = None
+    
+    class RouteShape(msgspec.Struct):
+        RouteUID: str
+        SubRouteUID: str
+        RouteName: I18n
+        Direction: int
+        Geometry: Optional[str] = None
+        EncodedPolyline: str
+        UpdateTime: Optional[str] = None
 
     def __init__(self, client_id: str, client_key: str, region: BusRegion | None = None, logger: Logger | None = None):
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
@@ -126,32 +139,42 @@ class tdx_bus(tdx_tool):
             return results
 
     @cached_property
-    def get_routes(self) -> pd.DataFrame:
+    def _route_stops(self) -> list[self.RouteStops]:
+        def decode(response: Response) -> list[self.RouteStops]: # type: ignore
+            return msgspec.json.decode(response.content, type=list[self.RouteStops])
+        
+        return self._fetch_combined_data(
+            prefix="v2/Bus/StopOfRoute",
+            params={
+                "$select": "RouteUID,SubRouteUID,RouteName,SubRouteName,Stops,OperatorIDs,Direction,City,CityCode,UpdateTime"
+            },
+            decoder=decode
+        )
+    
+    @cached_property
+    def routes(self) -> pd.DataFrame:
         """
         Fetch bus routes for the specified region.
         If the region has an ambiguous name, it will fetch routes for both regions if `together` is set to True.
         """
-        import requests.Response # type: ignore
-        def generate_url(middle_part: str) -> str:
-            return f"v2/Bus/Route/{middle_part}?%24format=JSON"
-        
-        def fetch_routes(url: str) -> requests.Response: # type: ignore
-            params = {
-                "$select": "RouteUID,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
-            }
-            self.logger.debug(f"Fetching bus routes from URL: {url}")
-            return self._get_data_from_suffix_url(url, params=params)
-        
-        def decode_routes(response: Response) -> pd.DataFrame: # type: ignore
-            routes = msgspec.json.decode(response.content, type=list[self.Route])
-            
+        def decoder(response: requests.Response) -> list[self.Route]: # type: ignore
+            return msgspec.json.decode(response.content, type=list[self.Route])
+
+        def parser(routes: list[self.Route]) -> pd.DataFrame: # type: ignore
             data = []
             for r in routes:
+                operators = pd.DataFrame([{
+                    "OperatorID": op.OperatorID,
+                    "OperatorNameZh": op.OperatorName.Zh_tw,
+                    "OperatorNameEn": op.OperatorName.En
+                } for op in r.Operators])
+
                 route_base = {
                     "RouteUID": r.RouteUID,
                     "RouteNameZh": r.RouteName.Zh_tw,
                     "RouteNameEn": r.RouteName.En,
                     "BusRouteType": r.BusRouteType,
+                    "Operators": operators,
                     "UpdateTime": r.UpdateTime,
                     "Route_Departure_Zh": r.DepartureStopNameZh,
                     "Route_Departure_En": r.DepartureStopNameEn,
@@ -179,39 +202,68 @@ class tdx_bus(tdx_tool):
                     data.append(row)
             
             return pd.DataFrame(data)
-        
-        # Main logic of get_routes
-        url = self._url_middle_part()
-        self.logger.debug(f"Fetching bus routes from URL: {url}")
-        data = decode_routes(fetch_routes(url[0]))
-
-        if self._together:
-            self.logger.debug(f"Fetching routes for ambiguous region: {self.region.ambiguous_name}")
-            ambiguous_data = decode_routes(fetch_routes(url[1]))
-            data = pd.concat([data, ambiguous_data], ignore_index=True)
-
-        return data
-        
+        # Main logic
+        return self._fetch_combined_data(
+            prefix="v2/Bus/Route",
+            params={
+                "$select": "RouteUID,Operators,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
+            },
+            decoder=decoder,
+            parser=parser
+        ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
+    
     @cached_property
-    def get_stations(self) -> gpd.GeoDataFrame:
+    def routes_with_shape(self) -> gpd.GeoDataFrame:
+        """
+        """
+        def decoder(response: requests.Response) -> list[self.RouteShape]: # type: ignore
+            return msgspec.json.decode(response.content, type=list[self.RouteShape])
+        
+        def parser(routes: list[self.RouteShape]) -> pd.DataFrame: # type: ignore
+            data = []
+            for r in routes:
+                try:
+                    geometry = shapely.wkt.loads(r.Geometry)
+                except Exception as e:
+                    self.logger.error(f"Error loading geometry for route {r.RouteUID}: {e}")
+                    geometry = None
+
+                data.append({
+                    "RouteUID": r.RouteUID,
+                    "SubRouteUID": r.SubRouteUID,
+                    "RouteNameZh": r.RouteName.Zh_tw,
+                    "RouteNameEn": r.RouteName.En,
+                    "Direction": r.Direction,
+                    "UpdateTime": r.UpdateTime,
+                    "geometry": geometry
+                })
+            return pd.DataFrame(data)
+        # Main logic
+        data = self._fetch_combined_data(
+            prefix="v2/Bus/Shape",
+            params={
+                "$select": "RouteUID,SubRouteUID,RouteName,Direction,Geometry,EncodedPolyline,UpdateTime"
+            },
+            decoder=decoder,
+            parser=parser
+        )
+        data.sort_values(by=["RouteNameEn", "SubRouteUID"], inplace=True)
+        data.reset_index(drop=True, inplace=True)
+        data = data.join(
+            self.routes.set_index(["RouteUID", "SubRouteUID"]),
+            on=["RouteUID", "SubRouteUID"],
+            how="left",
+            rsuffix="_route"
+            )
+        return gpd.GeoDataFrame(data, geometry="geometry", crs=self._default_coor)
+
+    @cached_property
+    def stations(self) -> gpd.GeoDataFrame:
         """
         Fetch bus stations for the specified region.
         If the region has an ambiguous name, it will fetch stations for both regions if `together` is set to True.
         """
-        import requests.Response # type: ignore
-        def generate_url(middle_part: str) -> str:
-            return f"v2/Bus/StopOfRoute/{middle_part}?%24format=JSON"
-        
-        def fetch_stop_of_route(url: str) -> requests.Response:
-            params = {
-                "$select": "RouteUID,SubRouteUID,RouteName,SubRouteName,Stops,OpratiorIDs,Direction,City,CityCode,UpdateTime"
-            }
-            self.logger.debug(f"Fetching bus stations from URL: {url}")
-            return self._get_data_from_suffix_url(url, params=params)
-        
-        def decode_stations(response: Response) -> pd.DataFrame: # type: ignore
-            route_stops = msgspec.json.decode(response.content, type=list[self.RouteStops])
-
+        def parser(route_stops: list[self.RouteStops]) -> pd.DataFrame: # type: ignore
             data = []
             for route in route_stops:
                 for s in route.Stops:
@@ -230,52 +282,68 @@ class tdx_bus(tdx_tool):
                         "Direction": route.Direction,
                         "Sequence": s.StopSequence,
                         "Boarding": s.StopBoarding,
-                        "OperatorIDs": ",".join([op.OperatorID for op in route.OpratiorIDs]),
+                        "OperatorIDs": ",".join([op.OperatorID for op in route.OperatorIDs]),
                         "City": route.City,
                         "CityCode": route.CityCode,
                         "UpdateTime": route.UpdateTime,
-                        "StopNameZh": s.StopName.Zh_tw,
-                        "StopNameEn": s.StopName.En,
                         "PositionLon": s.StopPosition.PositionLon,
                         "PositionLat": s.StopPosition.PositionLat,
                         "GeoHash": s.StopPosition.GeoHash
                     })
             
             return pd.DataFrame(data)
-        
-        # Main logic of get_stops
-        url_parts = self._url_middle_part()
-        self.logger.debug(f"Fetching bus stations from URL: {url_parts[0]}")
-        data = decode_stations(fetch_stop_of_route(url_parts[0]))
-
-        
-        if self._together:
-            self.logger.debug(f"Fetching stops for ambiguous region: {self.region.ambiguous_name}")
-            ambiguous_data = decode_stations(fetch_stop_of_route(url_parts[1]))
-            data = pd.concat([data, ambiguous_data], ignore_index=True)
-
+        # Main logic
+        data = parser(self._route_stops)
+        data.sort_values(by=["StationID", "SubRouteNameEn", "Sequence"], inplace=True)
+        data.reset_index(drop=True, inplace=True)
+        coor = data[["PositionLon", "PositionLat"]]
+        self.logger.debug(f"Creating GeoDataFrame with {len(data)} stations.")
         return gpd.GeoDataFrame(
-                data.sort_values(by=["StationID", "SubRouteUID", "Sequence"]).reset_index(drop=True),
-                geometry=gpd.points_from_xy(data["PositionLon"], data["PositionLat"]),
+                data.drop(columns=["PositionLon", "PositionLat"]),
+                geometry=gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
                 crs=self._default_coor
             )
     
-    @cached_property
-    def news(self) -> pd.DataFrame:
-        """
-        Fetch the latest news and updates related to bus services in the specified region.
-        This may include service disruptions, new route launches, and other important announcements.
-        """
-        pass
-
-    @cached_property
-    def alert(self) -> pd.DataFrame:
+    @property
+    def operate_status(self) -> pd.DataFrame:
         """
         Fetch current alerts and warnings for bus services in the specified region.
         This may include weather-related disruptions, traffic incidents affecting bus routes, and other urgent notifications.
         """
         pass
-    
+
+    @property
+    def alert(self) -> pd.DataFrame:
+        """
+        Same as operate_status, because TDx name it "Alert" but the content is more like "OperateStatus".
+        We keep both names for better user experience.
+        """
+        return self.operate_status
+
+    def refresh_cache(self, property_name: Literal["routes", "stations", "shape", "all"] = None) -> None:
+        """
+        Manually refresh the cached data for a specific property.
+        This is useful if you want to ensure you have the most up-to-date information without waiting for the cache to expire.
+        """
+        match property_name:
+            case "routes":
+                self.__dict__.pop("routes", None)
+                self.logger.info("Cache for routes has been refreshed.")
+            case "stations":
+                self.__dict__.pop("stations", None)
+                self.logger.info("Cache for stations has been refreshed.")
+            case "shape":
+                self.__dict__.pop("routes_with_shape", None)
+                self.logger.info("Cache for shape has been refreshed.")
+            case "all":
+                self.__dict__.pop("routes", None)
+                self.__dict__.pop("stations", None)
+                self.__dict__.pop("routes_with_shape", None)
+                self.logger.info("Cache for all has been refreshed.")
+            case _:
+                self.logger.warning("Invalid name, please specify a valid cache name.")
+
+
     def get_route_details(
             self,
             route_name: str,
@@ -285,21 +353,6 @@ class tdx_bus(tdx_tool):
         Route details include operator information, its subroutes, and
         all stops along the route with their sequence and boarding information.
         """
-        import requests.Response # type: ignore
-        def generate_url(middle_part: str) -> dict[str, str]:
-            return {
-                "stop_of_route": f"v2/Bus/StopOfRoute/{middle_part}/{route_name}?%24format=JSON",
-                "route": f"v2/Bus/Route{middle_part}/{route_name}?%24format=JSON"
-            }
-        
-        # TODO: Implement the fetch_route_details function
-        def fetch_route_details(url: str) -> requests.Response: # type: ignore
-            params = {
-                "$select": ""
-            }
-            self.logger.debug(f"Fetching route details from URL: {url}")
-            return self._get_data_from_suffix_url(url, params=params)
-        
         pass
 
     # TODO
@@ -319,7 +372,7 @@ class tdx_bus(tdx_tool):
         pass
 
     # TODO
-    def get_schedule_for_route(self, route_name: str, ) -> pd.DataFrame:
+    def get_schedule_for_route(self, route_name: str, only_departures: bool = False) -> pd.DataFrame:
         """
         Fetch the schedule for a specific route.
         This includes departure times from the starting point, arrival times at the destination, and frequency of service throughout the day.
