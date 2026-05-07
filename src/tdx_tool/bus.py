@@ -1,7 +1,7 @@
 # Dependency imports
 from functools import cached_property, cache
 from logging import Logger
-from typing import Literal
+from typing import Literal, Optional
 import logging, msgspec
 import pandas as pd
 import geopandas as gpd
@@ -15,31 +15,30 @@ class tdx_bus(tdx_tool):
     """
 
     """
-    identity_type = Literal["RouteUID", "RouteID", "RouteName", "RouteNameEn"]
     class SubRoute(msgspec.Struct):
         SubRouteUID: str
         SubRouteID: str
         Direction: int
-        SubRouteName: I18nName
+        SubRouteName: I18n
         OperatorIDs: list[str] = []
-        Headsign: str | None = None
-        HeadsignEn: str | None = None
-        DepartureStopNameZh: str | None = None
-        DepartureStopNameEn: str | None = None
-        DestinationStopNameZh: str | None = None
-        DestinationStopNameEn: str | None = None
+        Headsign: Optional[str] = None
+        HeadsignEn: Optional[str] = None
+        DepartureStopNameZh: Optional[str] = None
+        DepartureStopNameEn: Optional[str] = None
+        DestinationStopNameZh: Optional[str] = None
+        DestinationStopNameEn: Optional[str] = None
             
     class Route(msgspec.Struct):
         RouteUID: str
         BusRouteType: int
-        RouteName: I18nName
+        RouteName: I18n
         UpdateTime: str
         VersionID: int
-        DepartureStopNameZh: str | None = None
-        DepartureStopNameEn: str | None = None
-        DestinationStopNameZh: str | None = None
-        DestinationStopNameEn: str | None = None
-        SubRoutes: list[SubRoute] = []
+        DepartureStopNameZh: Optional[str] = None
+        DepartureStopNameEn: Optional[str] = None
+        DestinationStopNameZh: Optional[str] = None
+        DestinationStopNameEn: Optional[str] = None
+        SubRoutes: list[SubRoute] = [] # type: ignore
     
     class PointPosition(msgspec.Struct):
         PositionLon: float
@@ -48,22 +47,41 @@ class tdx_bus(tdx_tool):
     
     class Stop(msgspec.Struct):
         StopUID: str
-        StopName: I18nName
+        StopName: I18n
+        StopBoarding: int
+        StopSequence: int
+        StopPosition: PointPosition # type: ignore
         RouteUID: str
-        RouteName: I18nName
+        RouteName: I18n
+        StationID: str
+        StationGroupID: str
     
     class Station(msgspec.Struct):
         StationUID: str
-        StationName: I18nName
-        StationPosition: PointPosition
-        StationAddress: str = None
-        StationGroupID: str = None
-        Stops: list[Stop]
-        LocationCityCode: str = None
-        Bearing: str = None
-        UpdateTime: str = None
+        StationName: Optional[I18n] = None
+        StationPosition: PointPosition # type: ignore
+        StationAddress: Optional[str] = None
+        StationGroupID: Optional[str] = None
+        Stops: list[Stop] # type: ignore
+        LocationCityCode: Optional[str] = None
+        Bearing: Optional[str] = None
+        UpdateTime: Optional[str] = None
     
+    class Operator(msgspec.Struct):
+        OperatorID: str
+        OperatorName: I18n
 
+    class RouteStops(msgspec.Struct):
+        RouteUID: str
+        SubRouteUID: str
+        RouteName: I18n
+        SubRouteName: I18n
+        Stops: list[Stop] # type: ignore
+        OpratiorIDs: list[Operator] # type: ignore
+        Direction: int
+        City: str
+        CityCode: str
+        UpdateTime: str
 
     def __init__(self, client_id: str, client_key: str, region: BusRegion | None = None, logger: Logger | None = None):
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
@@ -98,7 +116,7 @@ class tdx_bus(tdx_tool):
     def together(self, is_on: bool = True):
         self._together = True if self.region.ambiguous_name is not None and is_on else None
 
-    def _url_middle_part(self) -> [str]:
+    def _url_middle_part(self) -> list[str]:
         if self.region == BusRegion.Intercity:
             return ["InterCity"]
         else:
@@ -113,18 +131,18 @@ class tdx_bus(tdx_tool):
         Fetch bus routes for the specified region.
         If the region has an ambiguous name, it will fetch routes for both regions if `together` is set to True.
         """
-        import requests.Response
+        import requests.Response # type: ignore
         def generate_url(middle_part: str) -> str:
             return f"v2/Bus/Route/{middle_part}?%24format=JSON"
         
-        def fetch_routes(url: str) -> requests.Response:
+        def fetch_routes(url: str) -> requests.Response: # type: ignore
             params = {
                 "$select": "RouteUID,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
             }
             self.logger.debug(f"Fetching bus routes from URL: {url}")
             return self._get_data_from_suffix_url(url, params=params)
         
-        def decode_routes(response: Response) -> pd.DataFrame:
+        def decode_routes(response: Response) -> pd.DataFrame: # type: ignore
             routes = msgspec.json.decode(response.content, type=list[self.Route])
             
             data = []
@@ -163,9 +181,8 @@ class tdx_bus(tdx_tool):
             return pd.DataFrame(data)
         
         # Main logic of get_routes
-        self.logger.debug(f"Fetching bus routes from URL: {url}")
-
         url = self._url_middle_part()
+        self.logger.debug(f"Fetching bus routes from URL: {url}")
         data = decode_routes(fetch_routes(url[0]))
 
         if self._together:
@@ -181,53 +198,130 @@ class tdx_bus(tdx_tool):
         Fetch bus stations for the specified region.
         If the region has an ambiguous name, it will fetch stations for both regions if `together` is set to True.
         """
-        import requests.Response
+        import requests.Response # type: ignore
         def generate_url(middle_part: str) -> str:
-            return f"v2/Bus//{middle_part}?%24format=JSON"
+            return f"v2/Bus/StopOfRoute/{middle_part}?%24format=JSON"
         
-        def fetch_stations(url: str) -> requests.Response:
+        def fetch_stop_of_route(url: str) -> requests.Response:
             params = {
-                "$select": "StopUID,StopName,StopPosition,StopAddress,Bearing,StationID,StationGroupID,StopDescription,CityCode,LocationCityCode,UpdateTime"
+                "$select": "RouteUID,SubRouteUID,RouteName,SubRouteName,Stops,OpratiorIDs,Direction,City,CityCode,UpdateTime"
             }
             self.logger.debug(f"Fetching bus stations from URL: {url}")
             return self._get_data_from_suffix_url(url, params=params)
         
-        def decode_stations(response: Response) -> pd.DataFrame:
-            
-            
-            
-            stops = msgspec.json.decode(response.content, type=list[self.Stop])
-            
-            data = []
-            for s in parsed_stops:
-                data.append({
-                    "StopUID": s.StopUID,
-                    "StopName_Zh_tw": s.StopName.Zh_tw,
-                    "StopName_En": s.StopName.En,
-                    "PositionLon": s.StopPosition.PositionLon,
-                    "PositionLat": s.StopPosition.PositionLat,
-                    "GeoHash": s.StopPosition.GeoHash,
-                    "StopAddress": s.StopAddress,
-                    "Bearing": s.Bearing,
-                    "StationID": s.StationID,
-                    "StationGroupID": s.StationGroupID,
-                    "StopDescription": s.StopDescription,
-                    "CityCode": s.CityCode,
-                    "LocationCityCode": s.LocationCityCode,
-                    "UpdateTime": s.UpdateTime
-                })
+        def decode_stations(response: Response) -> pd.DataFrame: # type: ignore
+            route_stops = msgspec.json.decode(response.content, type=list[self.RouteStops])
 
+            data = []
+            for route in route_stops:
+                for s in route.Stops:
+                    data.append({
+                        "StationID": s.StationID,
+                        "StationGroupID": s.StationGroupID,
+                        "StopUID": s.StopUID,
+                        "StopNameZh": s.StopName.Zh_tw,
+                        "StopNameEn": s.StopName.En,
+                        "RouteUID": route.RouteUID,
+                        "RouteNameZh": route.RouteName.Zh_tw,
+                        "RouteNameEn": route.RouteName.En,
+                        "SubRouteUID": route.SubRouteUID,
+                        "SubRouteNameZh": route.SubRouteName.Zh_tw,
+                        "SubRouteNameEn": route.SubRouteName.En,
+                        "Direction": route.Direction,
+                        "Sequence": s.StopSequence,
+                        "Boarding": s.StopBoarding,
+                        "OperatorIDs": ",".join([op.OperatorID for op in route.OpratiorIDs]),
+                        "City": route.City,
+                        "CityCode": route.CityCode,
+                        "UpdateTime": route.UpdateTime,
+                        "StopNameZh": s.StopName.Zh_tw,
+                        "StopNameEn": s.StopName.En,
+                        "PositionLon": s.StopPosition.PositionLon,
+                        "PositionLat": s.StopPosition.PositionLat,
+                        "GeoHash": s.StopPosition.GeoHash
+                    })
+            
             return pd.DataFrame(data)
         
         # Main logic of get_stops
-        self.logger.debug(f"Fetching bus stops from URL: {url}")
+        url_parts = self._url_middle_part()
+        self.logger.debug(f"Fetching bus stations from URL: {url_parts[0]}")
+        data = decode_stations(fetch_stop_of_route(url_parts[0]))
 
-        url = self._url_middle_part()
-        data = decode_stops(fetch_stops(url[0]))
-
+        
         if self._together:
             self.logger.debug(f"Fetching stops for ambiguous region: {self.region.ambiguous_name}")
-            ambiguous_data = decode_stops(fetch_stops(url[1]))
+            ambiguous_data = decode_stations(fetch_stop_of_route(url_parts[1]))
             data = pd.concat([data, ambiguous_data], ignore_index=True)
 
-        return data
+        return gpd.GeoDataFrame(
+                data.sort_values(by=["StationID", "SubRouteUID", "Sequence"]).reset_index(drop=True),
+                geometry=gpd.points_from_xy(data["PositionLon"], data["PositionLat"]),
+                crs=self._default_coor
+            )
+    
+    @cached_property
+    def news(self) -> pd.DataFrame:
+        """
+        Fetch the latest news and updates related to bus services in the specified region.
+        This may include service disruptions, new route launches, and other important announcements.
+        """
+        pass
+
+    @cached_property
+    def alert(self) -> pd.DataFrame:
+        """
+        Fetch current alerts and warnings for bus services in the specified region.
+        This may include weather-related disruptions, traffic incidents affecting bus routes, and other urgent notifications.
+        """
+        pass
+    
+    def get_route_details(
+            self,
+            route_name: str,
+            output_format: Optional[tdx_tool.GEOG_OUTPUT_TYPE] = None
+            ) -> gpd.GeoDataFrame:
+        """
+        Route details include operator information, its subroutes, and
+        all stops along the route with their sequence and boarding information.
+        """
+        import requests.Response # type: ignore
+        def generate_url(middle_part: str) -> dict[str, str]:
+            return {
+                "stop_of_route": f"v2/Bus/StopOfRoute/{middle_part}/{route_name}?%24format=JSON",
+                "route": f"v2/Bus/Route{middle_part}/{route_name}?%24format=JSON"
+            }
+        
+        # TODO: Implement the fetch_route_details function
+        def fetch_route_details(url: str) -> requests.Response: # type: ignore
+            params = {
+                "$select": ""
+            }
+            self.logger.debug(f"Fetching route details from URL: {url}")
+            return self._get_data_from_suffix_url(url, params=params)
+        
+        pass
+
+    # TODO
+    def get_estimated_arrival_for_route(self, route_name: str) -> pd.DataFrame:
+        """
+        Fetch real-time bus information for a specific route.
+        This includes estimated arrival times, current bus locations, and occupancy status.
+        """
+        pass
+
+    # TODO
+    def get_estimated_arrival_for_station(self, station_uid: str) -> pd.DataFrame:
+        """
+        Fetch real-time bus information for a specific station.
+        This includes estimated arrival times for all routes serving the station, current bus locations, and occupancy status.
+        """
+        pass
+
+    # TODO
+    def get_schedule_for_route(self, route_name: str, ) -> pd.DataFrame:
+        """
+        Fetch the schedule for a specific route.
+        This includes departure times from the starting point, arrival times at the destination, and frequency of service throughout the day.
+        """
+        pass

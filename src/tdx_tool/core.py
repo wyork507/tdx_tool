@@ -28,11 +28,37 @@ class tdx_tool:
         self.logger = logger or logging.getLogger(__name__)
         self.logger.debug("Initializing tdx_tool with provided client_id and client_key")
         self.auth = tdx_auth(client_id=client_id, client_key=client_key, logger=self.logger)
-        self.export_result = True
+        self._export_result = True
+        self._default_coor = "EPSG:4326" # WGS 84 - World Geodetic System 1984
 
     @property
     def auth_header(self) -> dict:
         return {"Authorization": f"Bearer {self.auth.token}", "Accept": "gzip"}
+    
+    @property
+    def export_result(self) -> bool:
+        return self._export_result
+    
+    @export_result.setter
+    def export_result(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            self.logger.error(f"Invalid value for export_result: {value}. Must be a boolean.")
+            raise ValueError("export_result must be a boolean value.")
+        self._export_result = value
+        self.logger.info(f"Set export_result to {value}")
+    
+    @property
+    def default_coor(self) -> str:
+        return self._default_coor
+    
+    @default_coor.setter
+    def default_coor(self, value: str) -> None:
+        if not isinstance(value, str):
+            self.logger.error(f"Invalid value for default_coor: {value}. Must be a string.")
+            raise ValueError("default_coor must be a string value representing a coordinate reference system (e.g., 'EPSG:4326').")
+        self._default_coor = value
+        self.logger.info(f"Set default_coor to {value}")
+
 
     def _get_data_from_suffix_url(self, suffix_url: str, params: dict | None = None, counter: int=2) -> requests.Response:
         from .utils import TDX_API_BASE as base_url
