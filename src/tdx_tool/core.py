@@ -1,12 +1,14 @@
 # Dependency imports
+from wsgiref.handlers import format_date_time
 from logging import Logger
 from typing import Literal
+from datetime import datetime
 import pandas as pd
 import geopandas as gpd
-import requests
-import os, logging
+import requests, os, logging, time
 # Local imports
 from .authority import tdx_auth
+from .utils import TDX_API_BASE as base_url
 
 class tdx_tool:
     """
@@ -62,30 +64,41 @@ class tdx_tool:
         self._default_coor = value
         self.logger.info(f"Set default_coor to {value}")
 
-
-    def _get_data_from_suffix_url(self, suffix_url: str, params: dict | None = None, counter: int=2) -> requests.Response:
-        from .utils import TDX_API_BASE as base_url
-        import time
+    def _get_data_from_suffix_url(
+        self,
+        suffix_url: str,
+        params: dict | None = None,
+        counter: int = 2,
+        check_modified: datetime | None = None
+        ) -> requests.Response | None:
+        """Fetch URL. `check_modified` may be a Unix timestamp (seconds) or a datetime.datetime.
+        If provided, it sets the `If-Modified-Since` header using seconds since epoch.
+        """
         url = f"{base_url}{suffix_url}"
         self.logger.info(f"Making GET request to URL: {url}")
+        headers = self.auth_header.copy()
+        if check_modified is not None:
+            headers["If-Modified-Since"] = format_date_time(check_modified.timestamp())
         try:
-            response = requests.get(url, headers=self.auth_header, params=params, timeout=10)
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params, timeout=10)
             self.logger.debug(f"Received response with status code: {response.status_code}")
             response.raise_for_status()
-            return response
         except requests.RequestException as e:
             match getattr(e.response, 'status_code', None):
                 case 401: # Unauthorized - likely token expired
                     self.logger.debug("Received 401 Unauthorized. Attempting to refresh token and retry...")
                     self.auth.update_token() # Refresh token
-                    return self._get_data_from_suffix_url(suffix_url, params, counter) # Retry immediately after refreshing token
+                    return self._get_data_from_suffix_url(suffix_url, params, counter, check_modified) # Retry immediately after refreshing token
                 case 429: # Too Many Requests - rate limit exceeded
                     if counter > 0:
                         wait_time: int = 4**(-counter+2) # Exponential backoff: 16, 4, 1 seconds
                         self.logger.debug(f"Received 429 Too Many Requests. Waiting for {wait_time} seconds before retrying...")
                         time.sleep(wait_time)
                         self.logger.debug(f"Retrying ... ({counter} attempts left)")
-                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
+                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1, check_modified)
                     else:
                         self.logger.error(f"Due to repeated 429 Too Many Requests, no more retries will be attempted for URL: {url}")
                         raise
@@ -94,9 +107,14 @@ class tdx_tool:
                         self.logger.debug(f"Failed due to: {e}. Waiting for 1 second before retrying...")
                         time.sleep(1)
                         self.logger.info(f"Retrying... ({counter} attempts left)")
-                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
+                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1, check_modified)
                     self.logger.error(f"Error occurred while fetching data from {url}:\n\t{e}")
                     raise
+        finally:
+            if response.status_code == 304: # Not Modified
+                self.logger.info(f"No new data available for URL: {url} (Last modified within the last hour)")
+                return None
+            return response
     
     def _fetch_combined_data(
         self,
@@ -141,7 +159,7 @@ class tdx_tool:
         timestamp: bool = True
         ) -> None:
 
-        def _generate_filename(prefix: str) -> str:
+        def generate_filename(prefix: str) -> str:
             from datetime import datetime
             return datetime.now().strftime("%Y_%m%d_%H%M")
 
@@ -158,7 +176,7 @@ class tdx_tool:
                 raise ValueError(f"Unsupported output type '{dtype}' for data type '{type(datas).__name__}'")
 
         if timestamp:
-            name = f"{name}-{_generate_filename(name)}"
+            name = f"{name}-{generate_filename(name)}"
             
         output_ext = {
             "shapefile": "shp",
