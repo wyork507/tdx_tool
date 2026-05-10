@@ -12,18 +12,28 @@ license = { file = "LICENSE" }
 authors = [
 	{ name = "tdx_tool contributors" }
 ]
-keywords = ["tdx", "transport", "taiwan", "bus", "api"]
+keywords = ["tdx", "transport", "taiwan", "bus", "rail", "api"]
 classifiers = [
 	"Programming Language :: Python :: 3",
 	"Programming Language :: Python :: 3 :: Only",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
 	"Operating System :: OS Independent"
 ]
 dependencies = [
 	"requests>=2.31",
 	"pandas>=2.2",
 	"geopandas>=0.14",
-	"pyarrow>=15"
+	"pyarrow>=15",
+	"msgspec>=0.18",
+	"shapely>=2.0",
+	"pyproj>=3.6"
 ]
+
+[project.urls]
+Homepage = "https://github.com/wyork507/tdx_tool"
+Source = "https://github.com/wyork507/tdx_tool"
 
 [project.optional-dependencies]
 dev = [
@@ -39,6 +49,7 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["tdx_tool*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

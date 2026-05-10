@@ -4,13 +4,12 @@ import requests, shapely, msgspec
 import pandas as pd
 import geopandas as gpd
 # Local imports
-import bus_models as bus
-from .utils import I18n
+from .bus_models import *
 
 
 class _bus_parsers:
     @staticmethod
-    def parse_routes(routes: list[bus.Route]) -> pd.DataFrame:
+    def parse_routes(routes: list[Route]) -> pd.DataFrame:
         """
         """
         data = []
@@ -52,7 +51,7 @@ class _bus_parsers:
         return pd.DataFrame(data)
     
     @staticmethod
-    def parse_route_with_shape(routes: list[bus.RouteShape]) -> pd.DataFrame:
+    def parse_route_with_shape(routes: list[RouteShape]) -> pd.DataFrame:
         """
         """
         data = []
@@ -74,7 +73,7 @@ class _bus_parsers:
         return pd.DataFrame(data)
     
     @staticmethod
-    def parse_stations(route_stops: list[bus.RouteStops]) -> pd.DataFrame:
+    def parse_stations(route_stops: list[RouteStops]) -> pd.DataFrame:
         """
         """
         data = []
@@ -95,7 +94,7 @@ class _bus_parsers:
                     "Direction": route.Direction,
                     "Sequence": s.StopSequence,
                     "Boarding": s.StopBoarding,
-                    "OperatorIDs": ",".join([op.OperatorID for op in route.OperatorIDs]),
+                    "OperatorIDs": ",".join([op.OperatorID for op in route.Operators]),
                     "City": route.City,
                     "CityCode": route.CityCode,
                     "UpdateTime": route.UpdateTime,
@@ -106,7 +105,7 @@ class _bus_parsers:
         return pd.DataFrame(data)
     
     @staticmethod
-    def parse_operators(operators: list[bus.Operator]) -> pd.DataFrame:
+    def parse_operators(operators: list[Operator]) -> pd.DataFrame:
         """
         """
         data = []
@@ -116,4 +115,36 @@ class _bus_parsers:
                 "OperatorNameZh": op.OperatorName.Zh_tw,
                 "OperatorNameEn": op.OperatorName.En
             })
+        return pd.DataFrame(data)
+
+    @staticmethod
+    def parse_schedules(schedules: list[Schedule]) -> pd.DataFrame:
+        """
+        """
+        data = []
+        for s in schedules:
+            base_info = {
+                "RouteUID": s.RouteUID,
+                "RouteNameZh": s.RouteName.Zh_tw,
+                "RouteNameEn": s.RouteName.En,
+                "SubRouteUID": s.SubRouteUID,
+                "SubRouteNameZh": s.SubRouteName.Zh_tw,
+                "SubRouteNameEn": s.SubRouteName.En,
+                "Direction": s.Direction,
+                "OperatorID": s.OperatorID,
+                "UpdateTime": s.UpdateTime
+            }
+            if s.has_timetable:
+                for t in s.Timetables:
+                    row = base_info.copy()
+                    row.update({
+                        "TripID": t.TripID,
+                        "isLowFloor": t.isLowFloor,
+                        "StopNameZh": t.StopName.Zh_tw,
+                        "StopNameEn": t.StopName.En,
+                        "ArrivalTime": t.ArrivalTime,
+                        "DepartureTime": t.DepartureTime,
+                        "StopSequence": t.StopSequence
+                    })
+                    data.append(row)
         return pd.DataFrame(data)

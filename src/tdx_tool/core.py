@@ -1,8 +1,10 @@
 # Dependency imports
 from wsgiref.handlers import format_date_time
 from logging import Logger
-from typing import Literal
+from typing import Literal, Optional, List, Callable
 from datetime import datetime
+from requests import Response
+from msgspec import Struct
 import pandas as pd
 import geopandas as gpd
 import requests, os, logging, time
@@ -16,8 +18,8 @@ class tdx_tool:
     
     Subclasses list:
     - `tdx_bus`: For bus-related data
-    - `tdx_railway`: For railway-related data
-    
+    - `tdx_rail`: For railway-related data
+    - `tdx_bike`: For bike-sharing-related data
     ---
     General Attributes:
         auth: An instance of `tdx_auth` for handling authentication
@@ -68,21 +70,14 @@ class tdx_tool:
         self,
         suffix_url: str,
         params: dict | None = None,
-        counter: int = 2,
-        check_modified: datetime | None = None
+        counter: int = 2
         ) -> requests.Response | None:
-        """Fetch URL. `check_modified` may be a Unix timestamp (seconds) or a datetime.datetime.
-        If provided, it sets the `If-Modified-Since` header using seconds since epoch.
-        """
         url = f"{base_url}{suffix_url}"
         self.logger.info(f"Making GET request to URL: {url}")
-        headers = self.auth_header.copy()
-        if check_modified is not None:
-            headers["If-Modified-Since"] = format_date_time(check_modified.timestamp())
         try:
             response = requests.get(
                 url,
-                headers=headers,
+                headers=self.auth_header,
                 params=params, timeout=10)
             self.logger.debug(f"Received response with status code: {response.status_code}")
             response.raise_for_status()
@@ -91,14 +86,14 @@ class tdx_tool:
                 case 401: # Unauthorized - likely token expired
                     self.logger.debug("Received 401 Unauthorized. Attempting to refresh token and retry...")
                     self.auth.update_token() # Refresh token
-                    return self._get_data_from_suffix_url(suffix_url, params, counter, check_modified) # Retry immediately after refreshing token
+                    return self._get_data_from_suffix_url(suffix_url, params, counter) # Retry immediately after refreshing token
                 case 429: # Too Many Requests - rate limit exceeded
                     if counter > 0:
                         wait_time: int = 4**(-counter+2) # Exponential backoff: 16, 4, 1 seconds
                         self.logger.debug(f"Received 429 Too Many Requests. Waiting for {wait_time} seconds before retrying...")
                         time.sleep(wait_time)
                         self.logger.debug(f"Retrying ... ({counter} attempts left)")
-                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1, check_modified)
+                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
                     else:
                         self.logger.error(f"Due to repeated 429 Too Many Requests, no more retries will be attempted for URL: {url}")
                         raise
@@ -107,22 +102,19 @@ class tdx_tool:
                         self.logger.debug(f"Failed due to: {e}. Waiting for 1 second before retrying...")
                         time.sleep(1)
                         self.logger.info(f"Retrying... ({counter} attempts left)")
-                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1, check_modified)
+                        return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
                     self.logger.error(f"Error occurred while fetching data from {url}:\n\t{e}")
                     raise
         finally:
-            if response.status_code == 304: # Not Modified
-                self.logger.info(f"No new data available for URL: {url} (Last modified within the last hour)")
-                return None
             return response
     
     def _fetch_combined_data(
         self,
         prefix: str,
         params: dict,
-        decoder: callable[[Response], list[ms.Struct]],
-        parser: Optional[callable[[ms.Struct], pd.DataFrame]] = None
-    ) -> list[ms.Struct] | pd.DataFrame:
+        decoder: Callable[Response, [Struct]],
+        parser: Callable[[Struct], pd.DataFrame] | None = None
+    ) -> List[Struct] | pd.DataFrame:
         """
         Fetch data from the API for the specified endpoint template and parameters.
 
@@ -143,12 +135,7 @@ class tdx_tool:
         if parser is None:
             return data
         else:
-            dfs = [parser(d) for d in data]
-            if len(dfs) > 1:
-                self.logger.debug("Combining data from multiple regions due to ambiguous region name.")
-                return pd.concat(dfs, ignore_index=True)
-            else:
-                return dfs[0]
+            return parser(data)
 
     def _save_to_file(
         self,

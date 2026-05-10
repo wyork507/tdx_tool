@@ -1,16 +1,21 @@
-from typing import Optional
-from msgspec import Struct
+# Dependencies
+import msgspec as ms
+from typing import List, Optional
 
-class Operator(Struct):
+class I18n(ms.Struct, kw_only=True):
+    Zh_tw: str
+    En: str = None
+
+class Operator(ms.Struct, kw_only=True):
     OperatorID: str
     OperatorName: I18n
 
-class SubRoute(Struct):
+class SubRoute(ms.Struct, kw_only=True):
     SubRouteUID: str
     SubRouteID: str
     Direction: int
     SubRouteName: I18n
-    OperatorIDs: list[str] = []
+    OperatorIDs: List[str] = []
     Headsign: Optional[str] = None
     HeadsignEn: Optional[str] = None
     DepartureStopNameZh: Optional[str] = None
@@ -18,83 +23,84 @@ class SubRoute(Struct):
     DestinationStopNameZh: Optional[str] = None
     DestinationStopNameEn: Optional[str] = None
         
-class Route(Struct):
+class Route(ms.Struct, kw_only=True):
     RouteUID: str
     BusRouteType: int
     RouteName: I18n
-    Operators: list[Operator] = []
-    UpdateTime: str
-    VersionID: int
+    Operators: List[Operator]
     DepartureStopNameZh: Optional[str] = None
     DepartureStopNameEn: Optional[str] = None
     DestinationStopNameZh: Optional[str] = None
     DestinationStopNameEn: Optional[str] = None
-    SubRoutes: list[SubRoute] = [] # type: ignore
+    SubRoutes: List[SubRoute] = []
+    UpdateTime: Optional[str] = None
 
-class Trips(Struct):
+class Trips(ms.Struct, kw_only=True):
     TripID: str
     RouteUID: str
     SubRouteUID: str
     Direction: int
     TripDepTime: str
 
-class PointPosition(Struct):
+class PointPosition(ms.Struct, kw_only=True):
     PositionLon: float
     PositionLat: float
     GeoHash: str
 
-class Stop(Struct):
+class Stop(ms.Struct, kw_only=True):
     StopUID: str
     StopName: I18n
     StopBoarding: int
     StopSequence: int
-    StopPosition: PointPosition # type: ignore
-    RouteUID: str
-    RouteName: I18n
+    StopPosition: PointPosition
     StationID: str
     StationGroupID: str
 
-class Station(Struct):
-    StationUID: str
-    StationName: Optional[I18n] = None
-    StationPosition: PointPosition # type: ignore
-    StationAddress: Optional[str] = None
-    StationGroupID: Optional[str] = None
-    Stops: list[Stop] # type: ignore
-    LocationCityCode: Optional[str] = None
-    Bearing: Optional[str] = None
-    UpdateTime: Optional[str] = None
-
-class RouteStops(Struct):
+class StopDetail(Stop):
     RouteUID: str
-    SubRouteUID: str
     RouteName: I18n
+
+class Station(ms.Struct, kw_only=True):
+    StationUID: str
+    StationPosition: PointPosition
+    StationName: I18n = None
+    StationAddress: str = None
+    StationGroupID: str = None
+    Stops: List[Stop] = [] # type: ignore
+    LocationCityCode: str = None
+    Bearing: str = None
+    UpdateTime: str = None
+
+class RouteStops(ms.Struct, kw_only=True):
+    RouteUID: str
+    RouteName: I18n
+    Operators: List[Operator] = [] # type: ignore
+    SubRouteUID: str
     SubRouteName: I18n
-    Stops: list[Stop] # type: ignore
-    OperatorIDs: list[Operator] # type: ignore
     Direction: int
     City: str
     CityCode: str
+    Stops: List[Stop] = [] # type: ignore
     UpdateTime: Optional[str] = None
 
-class RouteShape(Struct):
+class RouteShape(ms.Struct, kw_only=True):
     RouteUID: str
     SubRouteUID: str
     RouteName: I18n
     Direction: int
-    Geometry: Optional[str] = None
     EncodedPolyline: str
+    Geometry: Optional[str] = None
     UpdateTime: Optional[str] = None
 
-class Scope(Struct):
-    Operators: list[Operator] = []
-    Stops: list[Stop] = []
-    Stations: list[Station] = []
-    Routes: list[Route] = []
-    SubRoutes: list[SubRoute] = []
-    Trips: list[Trips] = []
+class Scope(ms.Struct, kw_only=True):
+    Operators: List[Operator] = []
+    Stops: List[Stop] = []
+    Stations: List[Station] = []
+    Routes: List[Route] = []
+    SubRoutes: List[SubRoute] = []
+    Trips: List[Trips] = []
 
-class Alert(Struct):
+class Alert(ms.Struct, kw_only=True):
     AlertID: str
     Title: str
     Description: str
@@ -110,17 +116,17 @@ class Alert(Struct):
     SrcUpdateTime: str
     UpdateTime: str
 
-class Period(Struct):
+class Period(ms.Struct, kw_only=True):
     StartDate: str
     EndDate: str
 
-class SpecialDay(Struct):
-    Dates: list[str]
+class SpecialDay(ms.Struct, kw_only=True):
+    Dates: List[str]
     DatePeriod: Period
     ServiceStatus: int
-    Description: str 
+    Description: Optional[str] = None
 
-class ServiceDay(Struct):
+class ServiceDay(ms.Struct, kw_only=True):
     Monday: int
     Tuesday: int
     Wednesday: int
@@ -131,52 +137,35 @@ class ServiceDay(Struct):
     NationalHolidays: int
     ServiceTag: Optional[str] = None
 
-    @property
-    def regular(self) -> list[bool]:
-        return [
-            self.Monday == 1,
-            self.Tuesday == 1,
-            self.Wednesday == 1,
-            self.Thursday == 1,
-            self.Friday == 1,
-            self.Saturday == 1,
-            self.Sunday == 1
-        ]
-    
-    @property
-    def holidays(self) -> bool:
-        return self.NationalHolidays == 1
-
-class Frequency(Struct):
+class Frequency(ms.Struct, kw_only=True):
     StartTime: str
     EndTime: str
     MinHeadwayMins: int
     MaxHeadwayMins: int
     ServiceDay: ServiceDay
-    SpecialDays: list[SpecialDay] = []
+    SpecialDays: List[SpecialDay] = []
 
-class StopTime(Struct):
+class StopTime(ms.Struct, kw_only=True):
     StopUID: str
     StopSequence: int
     StopName: I18n
     ArrivalTime: Optional[str] = None
     DepartureTime: Optional[str] = None
 
-class Timetable(Struct):
+class Timetable(ms.Struct, kw_only=True):
     TripID: str
     IsLowFloor: bool
     ServiceDay: ServiceDay
-    SpecialDays: list[SpecialDay] = []
-    StopTimes: list[StopTime] = []
+    SpecialDays: List[SpecialDay] = []
+    StopTimes: List[StopTime] = []
 
-class Schedule(Struct):
+class Schedule(ms.Struct, kw_only=True):
     RouteUID: str
     RouteName: I18n
     SubRouteUID: str
     SubRouteName: I18n
     Direction: int
     OperatorID: str
-    Timetable: list[Timetable] = []
-    Frequency: list[Frequency] = []
+    Timetables: List[Timetable] = []
+    Frequencys: List[Frequency] = []
     UpdateTime: Optional[str] = None
-    
