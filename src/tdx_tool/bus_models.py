@@ -1,10 +1,24 @@
 # Dependencies
-import msgspec as ms
+from enum import IntEnum
 from typing import List, Optional
+import msgspec as ms
+
+class Direction(IntEnum):
+    Forward  = 0    #往程
+    Backward = 1    #返程
+    Loop     = 2    #循環
+    Circular = 10   #環狀
+    Unknown  = 255  #未知
+
+class BusRouteType(IntEnum):
+    LocalCity  = 1  #市區公車
+    InterCity  = 12 #公路客運
+    Highway    = 13 #國道客運
+    Shuttle    = 14 #接駁車
 
 class I18n(ms.Struct, kw_only=True):
     Zh_tw: str
-    En: str = None
+    En: Optional[str] = None
 
 class Operator(ms.Struct, kw_only=True):
     OperatorID: str
@@ -35,7 +49,7 @@ class Route(ms.Struct, kw_only=True):
     SubRoutes: List[SubRoute] = []
     UpdateTime: Optional[str] = None
 
-class Trips(ms.Struct, kw_only=True):
+class Trip(ms.Struct, kw_only=True):
     TripID: str
     RouteUID: str
     SubRouteUID: str
@@ -56,20 +70,16 @@ class Stop(ms.Struct, kw_only=True):
     StationID: str
     StationGroupID: str
 
-class StopDetail(Stop):
-    RouteUID: str
-    RouteName: I18n
-
 class Station(ms.Struct, kw_only=True):
     StationUID: str
     StationPosition: PointPosition
-    StationName: I18n = None
-    StationAddress: str = None
-    StationGroupID: str = None
+    StationName: Optional[I18n] = None
+    StationAddress: Optional[str] = None
+    StationGroupID: Optional[str] = None
     Stops: List[Stop] = [] # type: ignore
-    LocationCityCode: str = None
-    Bearing: str = None
-    UpdateTime: str = None
+    LocationCityCode: Optional[str] = None
+    Bearing: Optional[str] = None
+    UpdateTime: Optional[str] = None
 
 class RouteStops(ms.Struct, kw_only=True):
     RouteUID: str
@@ -98,7 +108,7 @@ class Scope(ms.Struct, kw_only=True):
     Stations: List[Station] = []
     Routes: List[Route] = []
     SubRoutes: List[SubRoute] = []
-    Trips: List[Trips] = []
+    Trips: List[Trip] = []
 
 class Alert(ms.Struct, kw_only=True):
     AlertID: str
@@ -122,11 +132,12 @@ class Period(ms.Struct, kw_only=True):
 
 class SpecialDay(ms.Struct, kw_only=True):
     Dates: List[str]
-    DatePeriod: Period
+    DatePeriod: Optional[Period] = None
     ServiceStatus: int
     Description: Optional[str] = None
 
 class ServiceDay(ms.Struct, kw_only=True):
+    ServiceTag: Optional[str] = None
     Monday: int
     Tuesday: int
     Wednesday: int
@@ -135,7 +146,19 @@ class ServiceDay(ms.Struct, kw_only=True):
     Saturday: int
     Sunday: int
     NationalHolidays: int
-    ServiceTag: Optional[str] = None
+
+    @property
+    def days(self) -> List[bool]:
+        return [
+            self.Monday == 1,
+            self.Tuesday == 1,
+            self.Wednesday == 1,
+            self.Thursday == 1,
+            self.Friday == 1,
+            self.Saturday == 1,
+            self.Sunday == 1,
+            self.NationalHolidays == 1
+        ]
 
 class Frequency(ms.Struct, kw_only=True):
     StartTime: str

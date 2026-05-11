@@ -77,7 +77,7 @@ class tdx_bus(tdx_tool):
 
     @cached_property
     def _route_stops(self) -> list[RouteStops]:
-        def decode(response: requests.Response) -> list[RouteStops]: # type: ignore
+        def decode(response: requests.Response) -> list[RouteStops]:
             return msgspec.json.decode(response.content, type=list[RouteStops])
         
         return self._fetch_combined_data(
@@ -94,7 +94,7 @@ class tdx_bus(tdx_tool):
         Fetch bus routes for the specified region, then cache it.
         You can refresh the cache by `refresh_cache("routes")`.
         """
-        def decoder(response: requests.Response) -> list[Route]: # type: ignore
+        def decoder(response: requests.Response) -> list[Route]:
             return msgspec.json.decode(response.content, type=list[Route])
         # Main logic
         return self._fetch_combined_data(
