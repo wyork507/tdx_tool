@@ -1,16 +1,19 @@
 # Dependency imports
 from wsgiref.handlers import format_date_time
 from logging import Logger
-from typing import Literal, Optional, List, Callable
+from typing import Literal, Optional, List, Callable, TypeVar, overload
 from datetime import datetime
 from requests import Response
 from msgspec import Struct
 import pandas as pd
 import geopandas as gpd
 import requests, os, logging, time
+from pyproj.exceptions import CRSError
 # Local imports
 from .authority import tdx_auth
 from .utils import TDX_API_BASE as base_url
+
+T = TypeVar("T", bound=Struct)
 
 class tdx_tool:
     """
@@ -28,12 +31,14 @@ class tdx_tool:
     """
     FORM_OUTPUT_TYPE = Literal["csv", "parquet", "json"]
     GEOG_OUTPUT_TYPE = Literal["shapefile", "geojson"]
+
     def __init__(self, client_id: str, client_key: str, logger: Logger | None = None):
         self.logger = logger or logging.getLogger(__name__)
         self.logger.debug("Initializing tdx_tool with provided client_id and client_key")
-        self.auth = tdx_auth(client_id=client_id, client_key=client_key, logger=self.logger)
-        self._export_result = True
-        self._default_coor = "EPSG:4326" # WGS 84 - World Geodetic System 1984
+        self.auth = tdx_auth(client_id=client_id, client_key=client_key, logger=self.logger) 
+        self.__export_result = False
+        self.__default_coor = "EPSG:4326" # WGS 84 - World Geodetic System 1984
+        self.__output_path = "output"
 
     @property
     def auth_header(self) -> dict:
@@ -41,39 +46,51 @@ class tdx_tool:
     
     @property
     def export_result(self) -> bool:
-        return self._export_result
+        return self.__export_result
     
     @export_result.setter
     def export_result(self, value: bool) -> None:
         if not isinstance(value, bool):
             self.logger.error(f"Invalid value for export_result: {value}. Must be a boolean.")
             raise ValueError("export_result must be a boolean value.")
-        self._export_result = value
+        self.__export_result = value
         self.logger.info(f"Set export_result to {value}")
     
     @property
     def default_coor(self) -> str:
-        return self._default_coor
+        return self.__default_coor
     
     @default_coor.setter
     def default_coor(self, value: str) -> None:
         import pyproj
         try:
             pyproj.CRS(value) # Make sure the provided CRS string is valid
-        except pyproj.exceptions.CRSError as e:
+        except CRSError as e:
             self.logger.error(f"Invalid coordinate reference system: {value}. Error: {e}")
             raise ValueError(f"Invalid coordinate reference system: {value}. Please provide a valid CRS string (e.g., 'EPSG:4326').")
-        self._default_coor = value
+        self.__default_coor = value
         self.logger.info(f"Set default_coor to {value}")
+    
+    @property
+    def output_path(self) -> str:
+        return self.__output_path
+    
+    @output_path.setter
+    def output_path(self, value: str) -> None:
+        if not isinstance(value, str):
+            self.logger.error(f"Invalid value for output_path: {value}. Must be a string.")
+            raise ValueError("output_path must be a string value.")
+        self.__output_path = value
+        self.logger.info(f"Set output_path to {value}")
 
-    def _get_data_from_suffix_url(
-        self,
+    def _get_data_from_suffix_url(self,
         suffix_url: str,
         params: dict | None = None,
         counter: int = 2
-        ) -> requests.Response | None:
+    ) -> requests.Response:
         url = f"{base_url}{suffix_url}"
         self.logger.info(f"Making GET request to URL: {url}")
+        response: requests.Response | None = None
         try:
             response = requests.get(
                 url,
@@ -105,16 +122,40 @@ class tdx_tool:
                         return self._get_data_from_suffix_url(suffix_url, params, counter - 1)
                     self.logger.error(f"Error occurred while fetching data from {url}:\n\t{e}")
                     raise
-        finally:
-            return response
+        if response is None:
+            raise RuntimeError(f"Failed to fetch data from {url}")
+        return response
+
+    def _url_middle_part(self) -> list[str]:
+        raise NotImplementedError
+
+    @overload
+    def _fetch_combined_data(
+        self,
+        prefix: str,
+        params: dict,
+        decoder: Callable[[Response], list[T]],
+        parser: None = None,
+    ) -> list[T]:
+        ...
+
+    @overload
+    def _fetch_combined_data(
+        self,
+        prefix: str,
+        params: dict,
+        decoder: Callable[[Response], list[T]],
+        parser: Callable[[list[T]], pd.DataFrame],
+    ) -> pd.DataFrame:
+        ...
     
     def _fetch_combined_data(
         self,
         prefix: str,
         params: dict,
-        decoder: Callable[Response, [Struct]],
-        parser: Callable[[Struct], pd.DataFrame] | None = None
-    ) -> List[Struct] | pd.DataFrame:
+        decoder: Callable[[Response], list[T]],
+        parser: Callable[[list[T]], pd.DataFrame] | None = None
+    ) -> list[T] | pd.DataFrame:
         """
         Fetch data from the API for the specified endpoint template and parameters.
 
@@ -125,7 +166,7 @@ class tdx_tool:
         params : A dictionary of query parameters to include in the API request
         decoder : A function to decode the API response into a pandas DataFrame
         """
-        data = []
+        data: list[T] = []
         for middle_part in self._url_middle_part():
             suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
             self.logger.debug(f"Fetching data from URL: {suffix_url}")
@@ -136,56 +177,68 @@ class tdx_tool:
             return data
         else:
             return parser(data)
-
-    def _save_to_file(
-        self,
-        datas: pd.DataFrame | gpd.GeoDataFrame,
-        dtype: FORM_OUTPUT_TYPE | GEOG_OUTPUT_TYPE,
-        name: str,
-        path: str = None,
-        timestamp: bool = True
-        ) -> None:
-
-        def generate_filename(prefix: str) -> str:
-            from datetime import datetime
-            return datetime.now().strftime("%Y_%m%d_%H%M")
-
-        path = path or "output"
+    
+    @property
+    def __timestamp(self) -> str:
+        return datetime.now().strftime("%Y_%m-%d_%H:%M")
+    
+    def __check_path(self, path: str | None = None) -> str:
+        path = path or self.__output_path
+        if not isinstance(path, str):
+            self.logger.error(f"Invalid value for output_path: {path}. Must be a string.")
+            raise ValueError("output_path must be a string value.")
         os.makedirs(path, exist_ok=True)
-        
-        match datas, dtype:
-            case pd.DataFrame(), "csv" | "parquet" | "json":
-                output_type = dtype
-            case gpd.GeoDataFrame(), "shapefile" | "geojson":
-                output_type = dtype
-            case _:
-                self.logger.error(f"Data type and output type mismatch: {type(datas)} cannot be saved as {dtype}")
-                raise ValueError(f"Unsupported output type '{dtype}' for data type '{type(datas).__name__}'")
-
-        if timestamp:
-            name = f"{name}-{generate_filename(name)}"
-            
-        output_ext = {
-            "shapefile": "shp",
-            "geojson": "geojson",
-        }.get(output_type, output_type)
-        output_path = os.path.join(path, f"{name}.{output_ext}")
-        
-        match output_type:
+        return path
+    
+    def __given_name(self,
+        name: str | None,
+        timestamp: bool
+    ) -> str:
+        if name is None:
+            return f"data_{self.__timestamp}"
+        elif timestamp:
+            return f"{name}_{self.__timestamp}"
+        else:
+            return name
+    
+    def _save_to_file(self,
+        datas: pd.DataFrame,
+        dtype: FORM_OUTPUT_TYPE = "csv",
+        name: str | None = None,
+        path: str | None = None,
+        timestamp: bool = True,
+    ) -> None:
+        path = self.__check_path(path)
+        name = self.__given_name(name, timestamp)
+        self.logger.debug(f"Ready to save data to file with name: {name} and type: {dtype}")
+        output_path = os.path.join(path, f"{name}.{dtype}")
+        match dtype:
             case "csv":
                 datas.to_csv(output_path, index=False, encoding="utf-8")
             case "parquet":
                 datas.to_parquet(output_path, index=False)
             case "json":
                 datas.to_json(output_path, orient="records", force_ascii=False)
+            case _:
+                self.logger.error(f"Unsupported output type: {dtype}, output as csv by default.")
+                return self.__save_to_file(datas, dtype="csv", name=name, path=path, timestamp=False)
+
+    def _save_to_geofile(self,
+        datas: gpd.GeoDataFrame,
+        dtype: GEOG_OUTPUT_TYPE,
+        name: str | None = None,
+        path: str | None = None,
+        timestamp: bool = True,
+    ) -> None:
+        path = self.__check_path(path)
+        name = self.__given_name(name, timestamp)
+        self.logger.debug(f"Ready to save geospatial data to file with name: {name} and type: {dtype}")
+        output_path = os.path.join(path, f"{name}.{dtype}")
+        match dtype:
             case "geojson":
                 datas.to_file(output_path, driver="GeoJSON")
-            case _:
+            case "shapefile":
                 datas.to_file(output_path)
-        self.logger.info(f"Data saved to {output_path}")
-        
-    def __str__(self) -> str:
-        return f"tdx_tool(auth=tdx_auth(client_id={self.auth.client_id}, token_expire_time={self.auth._expire_time}))"
-    
-    def __repr__(self) -> str:
-        return self.__str__()
+            case _:
+                self.logger.error(f"Unsupported geospatial output type: {dtype}. Supported types are 'shapefile' and 'geojson'.")
+                return self._save_to_geofile(datas, dtype="shapefile", name=name, path=path, timestamp=False)

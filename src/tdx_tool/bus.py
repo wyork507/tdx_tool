@@ -14,7 +14,7 @@ import requests
 from .parsers import _bus_parsers as parsers
 from .core import tdx_tool
 from .utils import BusRegion
-from .bus_models import RouteStops, Route, RouteShape, Operator, Alert
+from .bus_models import RouteStops, Route, RouteShape, Operator, Alert, Schedule
 
 class tdx_bus(tdx_tool):
     """
@@ -36,25 +36,29 @@ class tdx_bus(tdx_tool):
     def __init__(self, client_id: str, client_key: str, region: BusRegion | None = None, logger: Logger | None = None):
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
         self.region = region if region else BusRegion.Intercity
-        self.logger.debug(f"tdx_bus initialized for region: {self.region.value}")
+        self.logger.debug(f"tdx_bus initialized for region: {self.region.value.en}")
         self._together = None
-        if self.region.ambiguous_name is not None:
+        if self.region.ambiguous_case is not None:
             self._together = False
             self.logger.warning(
                 "Ambiguous region name detected: %s and %s. Set `together = True` to fetch both.",
-                self.region.value,
-                self.region.ambiguous_name,
+                self.region.value.en,
+                self.region.ambiguous_case.value.en,
             )
 
     @classmethod
     def from_region_str(cls, client_id: str, client_key: str, region: str, logger: Logger | None = None):
-        normalized = region.replace("-", "_").replace(" ", "_")
-        regions = [r.name for r in BusRegion]
-
-        if region.capitalize() in regions:
-            return cls(client_id=client_id, client_key=client_key, logger=logger, region=BusRegion[region.capitalize()])
-        elif f"{region.capitalize()}County" in regions:
-            return cls(client_id=client_id, client_key=client_key, logger=logger, region=BusRegion[f"{region.capitalize()}County"])
+        """
+        Alternative constructor to initialize tdx_bus using a region name string instead of a BusRegion enum.
+        Note that the region string is case-insensitive and can be either the city name or the county name (e.g., "Hsinchu" or "HsinchuCounty").
+        """
+        regions = set([r.name for r in BusRegion] + [r.value for r in BusRegion])
+        target = region.replace("-", "").replace(" ", "")
+        
+        if target in regions:
+            return cls(client_id=client_id, client_key=client_key, logger=logger, region=BusRegion[target])
+        elif f"{target}County" in regions:
+            return cls(client_id=client_id, client_key=client_key, logger=logger, region=BusRegion[f"{target}County"])
         else:
             raise ValueError(f"Invalid region name: {region}. Valid options are: {[r.name for r in BusRegion]}")
 
@@ -64,15 +68,15 @@ class tdx_bus(tdx_tool):
     
     @together.setter
     def together(self, is_on: bool = True):
-        self._together = True if self.region.ambiguous_name is not None and is_on else None
+        self._together = True if self.region.ambiguous_case is not None and is_on else None
 
     def _url_middle_part(self) -> list[str]:
         if self.region == BusRegion.Intercity:
             return ["InterCity"]
         else:
-            results = [f"City/{self.region.value}"]
+            results = [f"City/{self.region.value.api_tag}"]
             if self._together:
-                results.append(f"City/{self.region.ambiguous_name}")
+                results.append(f"City/{self.region.ambiguous_case.value.api_tag}") # type: ignore
             return results
 
     @cached_property
@@ -129,7 +133,7 @@ class tdx_bus(tdx_tool):
             how="left",
             rsuffix="_route"
             )
-        return gpd.GeoDataFrame(data, geometry="geometry", crs=self._default_coor)
+        return gpd.GeoDataFrame(data, geometry="geometry", crs=self.default_coor)
 
     @cached_property
     def stations(self) -> gpd.GeoDataFrame:
@@ -144,7 +148,7 @@ class tdx_bus(tdx_tool):
         return gpd.GeoDataFrame(
                 data.drop(columns=["PositionLon", "PositionLat"]),
                 geometry=gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
-                crs=self._default_coor
+                crs=self.default_coor
             )
     
     @cached_property
@@ -153,7 +157,7 @@ class tdx_bus(tdx_tool):
         Fetch bus operators for the specified region.
         You can refresh the cache by `refresh_cache("operators")`.
         """
-        def decoder(response: requests.Response) -> list[Operator]: # type: ignore
+        def decoder(response: requests.Response) -> list[Operator]:
             return msgspec.json.decode(response.content, type=list[Operator])
         
         return self._fetch_combined_data(
@@ -171,7 +175,7 @@ class tdx_bus(tdx_tool):
         Fetch bus departure information for the specified region.
         You can refresh the cache by `refresh_cache("route_departure_info")`.
         """
-        def decoder(response: requests.Response) -> list[Schedule]: # type: ignore
+        def decoder(response: requests.Response) -> list[Schedule]:
             return msgspec.json.decode(response.content, type=list[Schedule])
         
         data = self._fetch_combined_data(
@@ -209,7 +213,7 @@ class tdx_bus(tdx_tool):
         return self._fetch_combined_data(
             prefix="v2/Bus/Alert",
             params={
-                "$select": "AlertID,Title,Description,Department,Status,Cause,Effect,Scope,AlertURL,PublishTime,StartTime,EndTime,SrcUpdateTime,UpdateTime"
+                "$select": "AlertID,Title,Description,Department,Status,Cause,Effect,Scope,PublishTime,StartTime,EndTime,SrcUpdateTime,UpdateTime"
             },
             decoder=decoder
         )
@@ -241,6 +245,9 @@ class tdx_bus(tdx_tool):
             case _:
                 self.logger.warning(f"Invalid property name for cache refresh: {property_name}. Valid options are:\n\t {', '.join(refreshable_properties)}")
         
+        if refresh_targets in ["stations", "routes_with_shape"]:
+            self.__dict__.pop("_route_stops", None)  # Clear the cached route stops if stations or routes_with_shape is being refreshed
+
         for target in refresh_targets:
             self.__dict__.pop(f"{target}", None)  # Remove the cached property if it exists
             self.logger.info(f"Cache for `{target}` has been refreshed.")

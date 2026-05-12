@@ -8,10 +8,10 @@ This document explains how to set up and work with the TDX Tool development envi
 
 ```bash
 # Make setup script executable
-chmod +x setup.sh
+chmod +x scripts/setup.sh
 
 # Run setup script (creates environment from environment.yml)
-./setup.sh
+./scripts/setup.sh
 
 # Activate environment
 conda activate tdx-dev
@@ -172,10 +172,10 @@ RUN pip install -r requirements-dev.txt && pip install -e ".[dev]"
 conda env create -f environment.yml --force-reinstall
 ```
 
-### Permission denied when running setup.sh
+### Permission denied when running scripts/setup.sh
 ```bash
-chmod +x setup.sh
-./setup.sh
+chmod +x scripts/setup.sh
+./scripts/setup.sh
 ```
 
 ### Import errors for geospatial packages
@@ -207,7 +207,9 @@ tdx_tool/
 ├── requirements.txt       # Core dependencies
 ├── requirements-dev.txt   # Development dependencies
 ├── .python-version        # Python version (3.11)
-├── setup.sh              # Automated setup script
+├── scripts/
+│   ├── setup.sh           # Automated setup script
+│   └── create_conda_env.ps1 # Windows setup script
 ├── Makefile              # Development commands
 ├── pyproject.toml        # Project metadata
 └── src/

@@ -116,6 +116,40 @@ class _bus_parsers:
                 "OperatorNameEn": op.OperatorName.En
             })
         return pd.DataFrame(data)
+    
+    @staticmethod
+    def parse_alerts(alerts: list[Alert]) -> pd.DataFrame:
+        data = []
+        for a in alerts:
+            base = pd.DataFrame()
+            base["AlertID"] = a.AlertID
+            base["TitleZh"] = a.Title
+            base["Description"] = a.Description
+            base["Department"] = a.Department
+            base["Status"] = a.Status
+            base["SrcUpdateTime"] = a.SrcUpdateTime
+            base["UpdateTime"] = a.UpdateTime
+            s: dict = a.Scope # type: ignore
+            if a.Status == 1:
+                data.append(base)
+            else:
+                base["Cause"] = a.Cause
+                base["Effect"] = a.Effect
+                base["PublishTime"] = a.PublishTime
+                base["StartTime"] = a.StartTime
+                base["EndTime"] = a.EndTime
+                
+                scope: pd.DataFrame = pd.json_normalize(
+                    s, record_path = list(s.keys()), sep = ""
+                    )
+                for _, row in scope.iterrows():
+                    base_copy = base.copy()
+                    for key, value in row.items():
+                        base_copy[key] = value
+                    data.append(base_copy)
+
+        return pd.concat(data, axis=0, ignore_index=True)
+
 
     @staticmethod
     def parse_schedules(schedules: list[Schedule]) -> pd.DataFrame:

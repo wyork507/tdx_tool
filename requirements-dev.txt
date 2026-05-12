@@ -1,11 +1,6 @@
 # Development dependencies
 -r requirements.txt
-
-pytest>=8
-pytest-mock>=3.14
-ruff>=0.6
-mypy>=1.11
-types-requests>=2.32
+-e .[dev]
 
 # Optional development tools
 ipython>=8.0

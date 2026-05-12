@@ -4,6 +4,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 echo "🚀 Setting up TDX Tool development environment..."
 echo ""
 
@@ -19,7 +22,7 @@ echo "✅ Conda found"
 # Create environment
 echo ""
 echo "📦 Creating conda environment from environment.yml..."
-conda env create -f environment.yml --force-reinstall -q
+conda env create -f "$ROOT_DIR/environment.yml" --force-reinstall -q
 
 echo "✅ Environment created successfully"
 echo ""

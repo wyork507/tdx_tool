@@ -1,20 +1,42 @@
 # Dependencies
 from enum import IntEnum
 from typing import List, Optional
+from functools import cached_property
 import msgspec as ms
+import pandas as pd
 
 class Direction(IntEnum):
-    Forward  = 0    #往程
-    Backward = 1    #返程
-    Loop     = 2    #循環
-    Circular = 10   #環狀
-    Unknown  = 255  #未知
+    Forward  = 0    # 往程
+    Backward = 1    # 返程
+    Loop     = 2    # 循環
+    Circular = 10   # 環狀
+    Unknown  = 255  # 未知
 
 class BusRouteType(IntEnum):
-    LocalCity  = 1  #市區公車
-    InterCity  = 12 #公路客運
-    Highway    = 13 #國道客運
-    Shuttle    = 14 #接駁車
+    LocalCity  = 1  # 市區公車
+    InterCity  = 12 # 公路客運
+    Highway    = 13 # 國道客運
+    Shuttle    = 14 # 接駁車
+
+class ServiceStatus(IntEnum):
+    Cancel = 0   # 全部營運停駛
+    Normal = 1   # 全部營運正常
+    Errors = 2   # 有異常狀況
+
+class ErrorCause(IntEnum):
+    Accident = 1 # 事故
+    Maintain = 2 # 維修
+    Technical = 3 # 技術問題
+    Construction = 4 # 施工
+    MedicalEmergency = 5 # 醫療緊急狀況
+    Weather = 6 # 氣候
+    Demonstration = 7 # 示威遊行
+    PoliceActivity = 8 # 政治活動/維安
+    Holiday = 9 # 假日/節慶
+    Strike = 10 # 罷工
+    Activity = 11 # 活動(如：國慶活動/煙火活動/跨年活動/路跑活動/新北耶誕城活動等)
+    OtherCause = 254 # 其他
+    UnknownCause = 255 # 未知原因
 
 class I18n(ms.Struct, kw_only=True):
     Zh_tw: str
@@ -102,30 +124,21 @@ class RouteShape(ms.Struct, kw_only=True):
     Geometry: Optional[str] = None
     UpdateTime: Optional[str] = None
 
-class Scope(ms.Struct, kw_only=True):
-    Operators: List[Operator] = []
-    Stops: List[Stop] = []
-    Stations: List[Station] = []
-    Routes: List[Route] = []
-    SubRoutes: List[SubRoute] = []
-    Trips: List[Trip] = []
-
 class Alert(ms.Struct, kw_only=True):
     AlertID: str
     Title: str
     Description: str
     Department: str
     Status: int
-    Cause: int
-    Effect: int
-    Scope: Scope
-    AlertURL: str
-    PublishTime: str
-    StartTime: str
-    EndTime: str
+    Cause: Optional[int] = None
+    Effect: Optional[int] = None
+    Scope: Optional[dict[str, object]] = None
+    PublishTime: Optional[str] = None
+    StartTime: Optional[str] = None
+    EndTime: Optional[str] = None
     SrcUpdateTime: str
     UpdateTime: str
-
+        
 class Period(ms.Struct, kw_only=True):
     StartDate: str
     EndDate: str
@@ -146,19 +159,6 @@ class ServiceDay(ms.Struct, kw_only=True):
     Saturday: int
     Sunday: int
     NationalHolidays: int
-
-    @property
-    def days(self) -> List[bool]:
-        return [
-            self.Monday == 1,
-            self.Tuesday == 1,
-            self.Wednesday == 1,
-            self.Thursday == 1,
-            self.Friday == 1,
-            self.Saturday == 1,
-            self.Sunday == 1,
-            self.NationalHolidays == 1
-        ]
 
 class Frequency(ms.Struct, kw_only=True):
     StartTime: str
