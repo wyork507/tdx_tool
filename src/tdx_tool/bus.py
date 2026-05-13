@@ -1,17 +1,13 @@
 # Dependency imports
 from datetime import datetime
-from enum import Enum
-from functools import cached_property, cache
+from functools import cached_property
 from logging import Logger
-from typing import Literal, Optional
-import logging, msgspec
+from typing import Literal
+import msgspec, requests
 import pandas as pd
 import geopandas as gpd
-import shapely
-import requests
-
 # Local imports
-from .parsers import _bus_parsers as parsers
+from .parsers import _bus_parsers
 from .core import tdx_tool
 from .utils import BusRegion
 from .bus_models import RouteStops, Route, RouteShape, Operator, Alert, Schedule
@@ -33,34 +29,62 @@ class tdx_bus(tdx_tool):
     Attributes:
 
     """
-    def __init__(self, client_id: str, client_key: str, region: BusRegion | None = None, logger: Logger | None = None):
+    def __init__(self,
+        client_id: str, client_key: str,
+        region: BusRegion | None = None,
+        together: bool = False,
+        logger: Logger | None = None
+    ):
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
         self.region = region if region else BusRegion.Intercity
         self.logger.debug(f"tdx_bus initialized for region: {self.region.value.en}")
         self._together = None
         if self.region.ambiguous_case is not None:
-            self._together = False
+            self._together = False if not together else True
             self.logger.warning(
                 "Ambiguous region name detected: %s and %s. Set `together = True` to fetch both.",
                 self.region.value.en,
                 self.region.ambiguous_case.value.en,
             )
+        self._parsers = _bus_parsers(self.logger)
 
     @classmethod
     def from_region_str(cls, client_id: str, client_key: str, region: str, logger: Logger | None = None):
         """
-        Alternative constructor to initialize tdx_bus using a region name string instead of a BusRegion enum.
-        Note that the region string is case-insensitive and can be either the city name or the county name (e.g., "Hsinchu" or "HsinchuCounty").
+        Enter a name string, such as "Taipei" or "Hsinchu", to initialize the class with the corresponding region.
+        ---
+        Parameters:
+        - `client_id`: Your TDx API client ID.
+        - `client_key`: Your TDx API client key.
+        - `region`: The name of the region you want to fetch data for.
+        ---
+        Returns:
+            An instance of `tdx_bus` initialized for the specified region.
+            Note that if the region name is ambiguous, default for together will be False.
+        ---
+        Raises:
+            ValueError: If the input string does not match any known region.
         """
-        regions = set([r.name for r in BusRegion] + [r.value for r in BusRegion])
-        target = region.replace("-", "").replace(" ", "")
+        from .utils import string_into_identity as convertor
+        try:
+            identity = convertor(region)
+            return cls(
+                client_id, client_key, BusRegion(identity), True, logger
+            )
+        except ValueError as e:
+            raise e
         
-        if target in regions:
-            return cls(client_id=client_id, client_key=client_key, logger=logger, region=BusRegion[target])
-        elif f"{target}County" in regions:
-            return cls(client_id=client_id, client_key=client_key, logger=logger, region=BusRegion[f"{target}County"])
-        else:
-            raise ValueError(f"Invalid region name: {region}. Valid options are: {[r.name for r in BusRegion]}")
+    @classmethod
+    def intercity(cls,
+        client_id: str,
+        client_key: str,
+        logger: Logger | None = None
+    ) -> "tdx_bus":
+        """ 
+        Returns:
+            An instance of `tdx_bus` initialized for the Intercity region, which includes all intercity bus routes across Taiwan.
+        """
+        return cls(client_id=client_id, client_key=client_key, logger=logger)
 
     @property
     def together(self) -> bool | None:
@@ -69,14 +93,18 @@ class tdx_bus(tdx_tool):
     @together.setter
     def together(self, is_on: bool = True):
         self._together = True if self.region.ambiguous_case is not None and is_on else None
-
+    
     def _url_middle_part(self) -> list[str]:
         if self.region == BusRegion.Intercity:
             return ["InterCity"]
         else:
-            results = [f"City/{self.region.value.api_tag}"]
-            if self._together:
-                results.append(f"City/{self.region.ambiguous_case.value.api_tag}") # type: ignore
+            results = [f"City/{self.region.api_tag}"]
+            if self._together is True:
+                others = self.region.ambiguous_case
+                if others is not None:
+                    results.append(f"City/{others.api_tag}")
+                else:
+                    self.logger.warning(f"No ambiguous region found for {self.region.value.en}, but `together` is set to True. Ignoring `together` setting.")
             return results
 
     @cached_property
@@ -107,7 +135,7 @@ class tdx_bus(tdx_tool):
                 "$select": "RouteUID,Operators,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
             },
             decoder=decoder,
-            parser=parsers.parse_routes
+            parser=self._parsers.parse_routes
         ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
     
     @cached_property
@@ -125,7 +153,7 @@ class tdx_bus(tdx_tool):
                 "$select": "RouteUID,SubRouteUID,RouteName,Direction,Geometry,EncodedPolyline,UpdateTime"
             },
             decoder=decoder,
-            parser=parsers.parse_route_with_shape
+            parser=self._parsers.parse_route_with_shape
         ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
         data = data.join(
             self.routes.set_index(["RouteUID", "SubRouteUID"]),
@@ -141,14 +169,14 @@ class tdx_bus(tdx_tool):
         Fetch bus stations for the specified region.
         You can refresh the cache by `refresh_cache("stations")`.
         """
-        data = parsers.parse_stations(self._route_stops)
+        data = self._parsers.parse_stations(self._route_stops)
         data = data.sort_values(by=["StationID", "SubRouteNameEn", "Sequence"]).reset_index(drop=True)
         coor = data[["PositionLon", "PositionLat"]]
         self.logger.debug(f"Creating GeoDataFrame with {len(data)} stations.")
         return gpd.GeoDataFrame(
                 data.drop(columns=["PositionLon", "PositionLat"]),
-                geometry=gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
-                crs=self.default_coor
+                geometry = gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
+                crs = self.default_coor
             )
     
     @cached_property
@@ -166,7 +194,7 @@ class tdx_bus(tdx_tool):
                 "$select": "OperatorID,OperatorName"
             },
             decoder=decoder,
-            parser=parsers.parse_operators
+            parser=self._parsers.parse_operators
         )
     
     @cached_property
@@ -197,7 +225,7 @@ class tdx_bus(tdx_tool):
         def decoder(response: requests.Response) -> list[RouteStops]: # type: ignore
             return msgspec.json.decode(response.content, type=list[RouteStops])
 
-        data = parsers.parse_stations_timetable(self._route_stops)
+        data = self._parsers.parse_stations_timetable(self._route_stops)
         return pd.DataFrame(data)
         """
 
@@ -234,18 +262,18 @@ class tdx_bus(tdx_tool):
         Manually refresh the cached data for a specific property.
         This is useful if you want to ensure you have the most up-to-date information without waiting for the cache to expire.
         """
-        refreshable_properties = ["routes", "stations", "routes_with_shape", "operators", "route_departure_info"]
-        refresh_targets = []
+        refreshable_properties = {"routes", "stations", "routes_with_shape", "operators", "route_departure_info"}
+        refresh_targets: set[str] = set()
         
         match property_name:
             case "all":
                 refresh_targets = refreshable_properties
             case _ if property_name in refreshable_properties:
-                refresh_targets = [property_name]
+                refresh_targets = {property_name}
             case _:
                 self.logger.warning(f"Invalid property name for cache refresh: {property_name}. Valid options are:\n\t {', '.join(refreshable_properties)}")
         
-        if refresh_targets in ["stations", "routes_with_shape"]:
+        if refresh_targets & {"stations", "routes_with_shape"}:
             self.__dict__.pop("_route_stops", None)  # Clear the cached route stops if stations or routes_with_shape is being refreshed
 
         for target in refresh_targets:

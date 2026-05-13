@@ -1,13 +1,13 @@
 # Dependency imports
-from wsgiref.handlers import format_date_time
 from logging import Logger
-from typing import Literal, Optional, List, Callable, TypeVar, overload
+from typing import Literal, Callable, TypeVar, overload
 from datetime import datetime
 from requests import Response
 from msgspec import Struct
 import pandas as pd
 import geopandas as gpd
 import requests, os, logging, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyproj.exceptions import CRSError
 # Local imports
 from .authority import tdx_auth
@@ -158,6 +158,8 @@ class tdx_tool:
     ) -> list[T] | pd.DataFrame:
         """
         Fetch data from the API for the specified endpoint template and parameters.
+        Uses concurrent requests to fetch data from multiple endpoints simultaneously.
+        Handles pagination automatically for endpoints with large datasets.
 
         Parameters
         ----------
@@ -165,13 +167,52 @@ class tdx_tool:
             example: `v2/Bus/Route`
         params : A dictionary of query parameters to include in the API request
         decoder : A function to decode the API response into a pandas DataFrame
+        parser : A function to parse the decoded data into a pandas DataFrame, or None to return the raw decoded data
         """
         data: list[T] = []
-        for middle_part in self._url_middle_part():
-            suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
-            self.logger.debug(f"Fetching data from URL: {suffix_url}")
-            response = self._get_data_from_suffix_url(suffix_url, params=params)
-            data.extend(decoder(response))
+        
+        def fetch_single_middle_part_with_pagination(middle_part: str) -> list[T]:
+            """Fetch data for a single middle_part, handling pagination automatically."""
+            result: list[T] = []
+            top_size = 500 # Number of records to fetch per request
+            skip = 0
+            
+            while True:
+                suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
+                # Add pagination parameters
+                request_params = params.copy() if params else {}
+                request_params["$top"] = top_size
+                request_params["$skip"] = skip
+                
+                self.logger.debug(f"Fetching data from URL: {suffix_url} (skip={skip}, top={top_size})")
+                response = self._get_data_from_suffix_url(suffix_url, params=request_params)
+                batch = decoder(response)
+                
+                result.extend(batch)
+                
+                # If we received fewer items than requested, we've reached the end
+                if len(batch) < top_size:
+                    break
+                time.sleep(0.05)
+                skip += top_size
+            
+            return result
+        
+        # Use ThreadPoolExecutor to fetch data concurrently
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                executor.submit(fetch_single_middle_part_with_pagination, middle_part): middle_part 
+                for middle_part in self._url_middle_part()
+            }
+            
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    data.extend(result)
+                except Exception as e:
+                    middle_part = futures[future]
+                    self.logger.error(f"Error fetching data for {middle_part}: {e}")
+                    raise
         
         if parser is None:
             return data

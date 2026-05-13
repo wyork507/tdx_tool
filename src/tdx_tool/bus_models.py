@@ -1,9 +1,9 @@
 # Dependencies
 from enum import IntEnum
 from typing import List, Optional
-from functools import cached_property
 import msgspec as ms
-import pandas as pd
+# Local imports
+from .common_models import I18n, PointPosition
 
 class Direction(IntEnum):
     Forward  = 0    # 往程
@@ -37,10 +37,6 @@ class ErrorCause(IntEnum):
     Activity = 11 # 活動(如：國慶活動/煙火活動/跨年活動/路跑活動/新北耶誕城活動等)
     OtherCause = 254 # 其他
     UnknownCause = 255 # 未知原因
-
-class I18n(ms.Struct, kw_only=True):
-    Zh_tw: str
-    En: Optional[str] = None
 
 class Operator(ms.Struct, kw_only=True):
     OperatorID: str
@@ -78,11 +74,6 @@ class Trip(ms.Struct, kw_only=True):
     Direction: int
     TripDepTime: str
 
-class PointPosition(ms.Struct, kw_only=True):
-    PositionLon: float
-    PositionLat: float
-    GeoHash: str
-
 class Stop(ms.Struct, kw_only=True):
     StopUID: str
     StopName: I18n
@@ -90,7 +81,7 @@ class Stop(ms.Struct, kw_only=True):
     StopSequence: int
     StopPosition: PointPosition
     StationID: str
-    StationGroupID: str
+    StationGroupID: Optional[str] = None
 
 class Station(ms.Struct, kw_only=True):
     StationUID: str

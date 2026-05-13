@@ -1,15 +1,21 @@
 # Dependencies
 from logging import Logger
-import requests, shapely, msgspec
 import pandas as pd
 import geopandas as gpd
+import shapely
 # Local imports
-from .bus_models import *
+from .bus_models import Route, RouteShape, RouteStops, Alert, Schedule, Operator
+from .bike_models import Station, Availability
 
+class _parsers:
+    def __init__(self, logger: Logger):
+        self.logger = logger
 
-class _bus_parsers:
-    @staticmethod
-    def parse_routes(routes: list[Route]) -> pd.DataFrame:
+class _bus_parsers(_parsers):
+    def __init__(self, logger: Logger):
+        super().__init__(logger)
+    
+    def parse_routes(self, routes: list[Route]) -> pd.DataFrame:
         """
         """
         data = []
@@ -50,16 +56,15 @@ class _bus_parsers:
                 data.append(row)
         return pd.DataFrame(data)
     
-    @staticmethod
-    def parse_route_with_shape(routes: list[RouteShape]) -> pd.DataFrame:
+    def parse_route_with_shape(self, routes: list[RouteShape]) -> pd.DataFrame:
         """
         """
         data = []
         for r in routes:
             try:
-                geometry = shapely.wkt.loads(r.Geometry)
+                geometry = shapely.wkt.loads(r.Geometry) # type: ignore
             except Exception as e:
-                self.logger.error(f"Error loading geometry for route {r.RouteUID}: {e}")
+                self.logger.warning(f"Failed to parse geometry for RouteUID {r.RouteUID}, SubRouteUID {r.SubRouteUID}: {e}")
                 geometry = None
             data.append({
                 "RouteUID": r.RouteUID,
@@ -72,8 +77,7 @@ class _bus_parsers:
             })
         return pd.DataFrame(data)
     
-    @staticmethod
-    def parse_stations(route_stops: list[RouteStops]) -> pd.DataFrame:
+    def parse_stations(self, route_stops: list[RouteStops]) -> pd.DataFrame:
         """
         """
         data = []
@@ -104,8 +108,7 @@ class _bus_parsers:
                 })
         return pd.DataFrame(data)
     
-    @staticmethod
-    def parse_operators(operators: list[Operator]) -> pd.DataFrame:
+    def parse_operators(self, operators: list[Operator]) -> pd.DataFrame:
         """
         """
         data = []
@@ -117,8 +120,7 @@ class _bus_parsers:
             })
         return pd.DataFrame(data)
     
-    @staticmethod
-    def parse_alerts(alerts: list[Alert]) -> pd.DataFrame:
+    def parse_alerts(self,alerts: list[Alert]) -> pd.DataFrame:
         data = []
         for a in alerts:
             base = pd.DataFrame()
@@ -150,9 +152,7 @@ class _bus_parsers:
 
         return pd.concat(data, axis=0, ignore_index=True)
 
-
-    @staticmethod
-    def parse_schedules(schedules: list[Schedule]) -> pd.DataFrame:
+    def parse_schedules(self, schedules: list[Schedule]) -> pd.DataFrame:
         """
         """
         data = []
@@ -182,3 +182,52 @@ class _bus_parsers:
                     })
                     data.append(row)
         return pd.DataFrame(data)
+    
+class _bike_parsers(_parsers):
+    def __init__(self, logger: Logger):
+        super().__init__(logger)
+    
+    def parse_stations(self, stations: list[Station]) -> pd.DataFrame:
+        """
+        """
+        data = []
+        for s in stations:
+            data.append({
+                "StationUID": s.StationUID,
+                "StationNameZh": s.StationName.Zh_tw,
+                "StationNameEn": s.StationName.En,
+                "StationPosition": s.StationPosition,
+                "StationAddressZh": s.StationAddress.Zh_tw,
+                "StationAddressEn": s.StationAddress.En,
+                "StopDescription": s.StopDescription,
+                "BikesCapacity": s.BikesCapacity,
+                "ServiceType": s.ServiceType,
+                "UpdateTime": s.UpdateTime,
+                "PositionLon": s.StationPosition.PositionLon,
+                "PositionLat": s.StationPosition.PositionLat,
+                "GeoHash": s.StationPosition.GeoHash
+            })
+        return pd.DataFrame(data)
+    
+    def parse_availability(self, availability: list[Availability]) -> pd.DataFrame:
+        """
+        """
+        data = []
+        for a in availability:
+            base = {
+                "StationUID": a.StationUID,
+                "ServiceStatus": a.ServiceStatus,
+                "AvailableRentBikes": a.AvailableRentBikes,
+                "AvailableReturnBikes": a.AvailableReturnBikes,
+                "UpdateTime": a.UpdateTime
+            }
+            if a.AvailableRentBikesDetail is not None:
+                base["AvailableGeneralBikes"] = a.AvailableRentBikesDetail.GeneralBikes
+                base["AvailableElectricBikes"] = a.AvailableRentBikesDetail.ElectricBikes
+            data.append(base)
+        return pd.DataFrame(data)
+
+class _rail_parsers(_parsers):
+    def __init__(self, logger: Logger):
+        super().__init__(logger)
+        
