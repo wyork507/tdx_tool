@@ -21,8 +21,8 @@ class tdx_bike(tdx_tool):
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
         if regions is None:
             raise ValueError("Regions must be specified for `tdx_bike` enums.")
-        self.regions = regions
-        self.logger.debug(f"tdx_bike initialized for region(s): {', '.join(r.value.en for r in self.regions)}")
+        self.__regions = regions
+        self.logger.debug(f"tdx_bike initialized for region(s): {', '.join(r.value.en for r in self.__regions)}")
         self._parsers = _bike_parsers(self.logger)
     
     @classmethod
@@ -58,10 +58,13 @@ class tdx_bike(tdx_tool):
         return cls(
             client_id, client_key, [BikeRegion(identity) for identity in identities if identity is not None], logger=logger
         )
-        
+    
+    @property
+    def regions(self) -> list[BikeRegion]:
+        return self.__regions
 
     def _url_middle_part(self) -> list[str]:
-        return [f"City/{region.api_tag}" for region in self.regions]
+        return [f"City/{region.api_tag}" for region in self.__regions]
 
     @cached_property
     def stations(self) -> gpd.GeoDataFrame:
@@ -88,8 +91,7 @@ class tdx_bike(tdx_tool):
     
     def fetch_availability(self) -> pd.DataFrame:
         """
-         Fetch bike availability data for the specified region.
-         You can refresh the cache by `refresh_cache("availability")`.
+        Fetch bike availability data for the specified region.
         """
         def decoder(response: requests.Response) -> list[Availability]:
             return msgspec.json.decode(response.content, type=list[Availability])

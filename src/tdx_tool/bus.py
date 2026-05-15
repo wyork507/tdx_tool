@@ -36,15 +36,15 @@ class tdx_bus(tdx_tool):
         logger: Logger | None = None
     ):
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
-        self.region = region if region else BusRegion.Intercity
-        self.logger.debug(f"tdx_bus initialized for region: {self.region.value.en}")
+        self.__region = region if region else BusRegion.Intercity
+        self.logger.debug(f"tdx_bus initialized for region: {self.__region.value.en}")
         self._together = None
-        if self.region.ambiguous_case is not None:
+        if self.__region.ambiguous_case is not None:
             self._together = False if not together else True
             self.logger.warning(
                 "Ambiguous region name detected: %s and %s. Set `together = True` to fetch both.",
-                self.region.value.en,
-                self.region.ambiguous_case.value.en,
+                self.__region.value.en,
+                self.__region.ambiguous_case.value.en,
             )
         self._parsers = _bus_parsers(self.logger)
 
@@ -92,19 +92,23 @@ class tdx_bus(tdx_tool):
     
     @together.setter
     def together(self, is_on: bool = True):
-        self._together = True if self.region.ambiguous_case is not None and is_on else None
+        self._together = True if self.__region.ambiguous_case is not None and is_on else None
+    
+    @property
+    def region(self) -> BusRegion:
+        return self.__region        
     
     def _url_middle_part(self) -> list[str]:
-        if self.region == BusRegion.Intercity:
+        if self.__region == BusRegion.Intercity:
             return ["InterCity"]
         else:
-            results = [f"City/{self.region.api_tag}"]
+            results = [f"City/{self.__region.api_tag}"]
             if self._together is True:
-                others = self.region.ambiguous_case
+                others = self.__region.ambiguous_case
                 if others is not None:
                     results.append(f"City/{others.api_tag}")
                 else:
-                    self.logger.warning(f"No ambiguous region found for {self.region.value.en}, but `together` is set to True. Ignoring `together` setting.")
+                    self.logger.warning(f"No ambiguous region found for {self.__region.value.en}, but `together` is set to True. Ignoring `together` setting.")
             return results
 
     @cached_property

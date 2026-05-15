@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
-from typing import Optional, Literal
+from typing import Optional, Literal, TypeVar
 # Local imports
 from .bike_models import ServiceType
 from .common_models import I18n, PointPosition, Identity
@@ -303,3 +303,81 @@ class RailwayOperator(Enum):
                 }
             case _:
                 return None
+
+class RailwayRegion(Enum):
+    """
+    A enum for regions with railway available in Taiwan.
+    """
+    Keelung     = ZONES["KEE"]
+    Taipei      = ZONES["TPE"]
+    New_Taipei  = ZONES["NWT"]
+    Taoyuan     = ZONES["TAO"]
+    HsinchuCity = ZONES["HSZ"]
+    Hsinchu     = ZONES["HSQ"]
+    Miaoli      = ZONES["MIA"]
+    Taichung    = ZONES["TXG"]
+    Changhua    = ZONES["CHA"]
+    Nantou      = ZONES["NAN"]
+    Yunlin      = ZONES["YUN"]
+    ChiayiCity  = ZONES["CYI"]
+    Chiayi      = ZONES["CYQ"]
+    Tainan      = ZONES["TNN"]
+    Kaohsiung   = ZONES["KHH"]
+    Pingtung    = ZONES["PIF"]
+    Yilan       = ZONES["ILA"]
+    Hualien     = ZONES["HUA"]
+    Taitung     = ZONES["TTT"]
+
+    @property
+    def hasTRC(self) -> bool:
+        return True
+    
+    @property
+    def hasHSR(self) -> bool:
+        if self in [
+            RailwayRegion.Keelung,
+            RailwayRegion.HsinchuCity,
+            RailwayRegion.ChiayiCity,
+            RailwayRegion.Pingtung,
+            RailwayRegion.Yilan,
+            RailwayRegion.Hualien,
+            RailwayRegion.Taitung
+        ]:
+            return False
+        else:
+            return True
+    
+    @property
+    def hasMetro(self) -> bool:
+        if self in [
+            RailwayRegion.Taipei,
+            RailwayRegion.New_Taipei,
+            RailwayRegion.Taoyuan,
+            RailwayRegion.Taichung,
+            RailwayRegion.Kaohsiung
+        ]:
+            return True
+        else:
+            return False
+
+    @property
+    def operators(self) -> list[RailwayOperator]:
+        ops = []
+        if self.hasTRC:
+            ops.append(RailwayOperator.INTER_TRC)
+        if self.hasHSR:
+            ops.append(RailwayOperator.INTER_HSR)
+        if self.hasMetro:
+            match self:
+                case RailwayRegion.Taipei | RailwayRegion.New_Taipei:
+                    ops.append(RailwayOperator.METRO_TPE)
+                    ops.append(RailwayOperator.METRO_NTP)
+                    ops.append(RailwayOperator.METRO_TAO)
+                case RailwayRegion.Taoyuan:
+                    ops.append(RailwayOperator.METRO_TAO)
+                case RailwayRegion.Taichung:
+                    ops.append(RailwayOperator.METRO_TXG)
+                case RailwayRegion.Kaohsiung:
+                    ops.append(RailwayOperator.METRO_KNN)
+        return ops
+    
