@@ -1,5 +1,6 @@
 # Dependencies
-from enum import IntEnum
+from dataclasses import dataclass
+from enum import IntEnum, Enum
 from typing import List, Optional
 import msgspec as ms
 # Local imports
@@ -18,25 +19,68 @@ class BusRouteType(IntEnum):
     Highway    = 13 # 國道客運
     Shuttle    = 14 # 接駁車
 
-class ServiceStatus(IntEnum):
-    Cancel = 0   # 全部營運停駛
-    Normal = 1   # 全部營運正常
-    Errors = 2   # 有異常狀況
+class ServiceStatus(Enum):
+    Cancel = "停駛"
+    Normal = "正常"
+    Errors = "異常"
+    Addion = "加班"
+
+    @classmethod
+    def from_alert(cls, alert_status: int) -> Optional["ServiceStatus"]:
+        for status in cls:
+            if status.alert_status == alert_status:
+                return status
+        return None
+    
+    @classmethod
+    def from_timetable(cls, timetable_status: int) -> Optional["ServiceStatus"]:
+        for status in cls:
+            if status.timetable_status == timetable_status:
+                return status
+        return None
+    
+    @property
+    def description(self) -> str:
+        return self.value
+
+    @property
+    def alert_status(self) -> Optional[int]:
+        match self:
+            case ServiceStatus.Cancel:
+                return 0
+            case ServiceStatus.Normal:
+                return 1
+            case ServiceStatus.Errors:
+                return 2
+            case _:
+                return None
+    
+    @property
+    def timetable_status(self) -> Optional[int]:
+        match self:
+            case ServiceStatus.Normal:
+                return 0
+            case ServiceStatus.Addion:
+                return 1
+            case ServiceStatus.Cancel:
+                return 2
+            case _:
+                return None
 
 class ErrorCause(IntEnum):
-    Accident = 1 # 事故
-    Maintain = 2 # 維修
-    Technical = 3 # 技術問題
-    Construction = 4 # 施工
+    Accident        = 1 # 事故
+    Maintain        = 2 # 維修
+    Technical       = 3 # 技術問題
+    Construction    = 4 # 施工
     MedicalEmergency = 5 # 醫療緊急狀況
-    Weather = 6 # 氣候
-    Demonstration = 7 # 示威遊行
-    PoliceActivity = 8 # 政治活動/維安
-    Holiday = 9 # 假日/節慶
-    Strike = 10 # 罷工
-    Activity = 11 # 活動(如：國慶活動/煙火活動/跨年活動/路跑活動/新北耶誕城活動等)
-    OtherCause = 254 # 其他
-    UnknownCause = 255 # 未知原因
+    Weather         = 6 # 氣候
+    Demonstration   = 7 # 示威遊行
+    PoliceActivity  = 8 # 政治活動/維安
+    Holiday         = 9 # 假日/節慶
+    Strike          = 10 # 罷工
+    Activity        = 11 # 活動(如：國慶活動/煙火活動/跨年活動/路跑活動/新北耶誕城活動等)
+    OtherCause      = 254 # 其他
+    UnknownCause    = 255 # 未知原因
 
 class Operator(ms.Struct, kw_only=True):
     OperatorID: str
@@ -65,14 +109,7 @@ class Route(ms.Struct, kw_only=True):
     DestinationStopNameZh: Optional[str] = None
     DestinationStopNameEn: Optional[str] = None
     SubRoutes: List[SubRoute] = []
-    UpdateTime: Optional[str] = None
-
-class Trip(ms.Struct, kw_only=True):
-    TripID: str
-    RouteUID: str
-    SubRouteUID: str
-    Direction: int
-    TripDepTime: str
+    UpdateTime: str
 
 class Stop(ms.Struct, kw_only=True):
     StopUID: str
@@ -92,7 +129,7 @@ class Station(ms.Struct, kw_only=True):
     Stops: List[Stop] = [] # type: ignore
     LocationCityCode: Optional[str] = None
     Bearing: Optional[str] = None
-    UpdateTime: Optional[str] = None
+    UpdateTime: str
 
 class RouteStops(ms.Struct, kw_only=True):
     RouteUID: str
@@ -104,7 +141,7 @@ class RouteStops(ms.Struct, kw_only=True):
     City: str
     CityCode: str
     Stops: List[Stop] = [] # type: ignore
-    UpdateTime: Optional[str] = None
+    UpdateTime: str
 
 class RouteShape(ms.Struct, kw_only=True):
     RouteUID: str
@@ -113,7 +150,7 @@ class RouteShape(ms.Struct, kw_only=True):
     Direction: int
     EncodedPolyline: str
     Geometry: Optional[str] = None
-    UpdateTime: Optional[str] = None
+    UpdateTime: str
 
 class Alert(ms.Struct, kw_only=True):
     AlertID: str
@@ -134,13 +171,19 @@ class Period(ms.Struct, kw_only=True):
     StartDate: str
     EndDate: str
 
-class SpecialDay(ms.Struct, kw_only=True):
+@dataclass(kw_only=True)
+class SpecialDay:
     Dates: List[str]
     DatePeriod: Optional[Period] = None
     ServiceStatus: int
     Description: Optional[str] = None
 
-class ServiceDay(ms.Struct, kw_only=True):
+    @property
+    def status(self) -> "ServiceStatus":
+        return ServiceStatus.from_timetable(self.ServiceStatus) # type: ignore
+
+@dataclass(kw_only=True)
+class ServiceDay:
     ServiceTag: Optional[str] = None
     Monday: int
     Tuesday: int
@@ -150,6 +193,36 @@ class ServiceDay(ms.Struct, kw_only=True):
     Saturday: int
     Sunday: int
     NationalHolidays: int
+
+    def __item_for(self, boolean: bool, exclude: set[str] | None = None) -> list[str]:
+        if exclude is None:
+            exclude = set()
+        fields = ServiceDay.__dataclass_fields__.keys()
+        result = []
+        for name in fields - exclude - {"ServiceTag"}:
+            if getattr(self, name) == boolean:
+                result.append(name)
+        return result
+    
+    @property
+    def has_service_on_holidays(self) -> bool:
+        return self.NationalHolidays == 1
+    
+    @property
+    def flat(self) -> dict[str, bool]:
+        return {
+            "Monday": self.Monday == 1,
+            "Tuesday": self.Tuesday == 1,
+            "Wednesday": self.Wednesday == 1,
+            "Thursday": self.Thursday == 1,
+            "Friday": self.Friday == 1,
+            "Saturday": self.Saturday == 1,
+            "Sunday": self.Sunday == 1,
+        }
+    
+    @property
+    def service_days(self) -> list[str]:
+        return self.__item_for(True)
 
 class Frequency(ms.Struct, kw_only=True):
     StartTime: str
@@ -166,20 +239,45 @@ class StopTime(ms.Struct, kw_only=True):
     ArrivalTime: Optional[str] = None
     DepartureTime: Optional[str] = None
 
+@dataclass(kw_only=True)
+class StopTimeDetail:
+    StopUID: str
+    StopSequence: int
+    StopName: I18n
+    ArrivalTime: Optional[str] = None
+    DepartureTime: Optional[str] = None
+    TimeType: Optional[int] = None
+
+    @property
+    def is_estimated_time(self) -> bool:
+        return self.TimeType == 0
+
+
+class DailyTimetable(ms.Struct, kw_only=True):
+    TripID: str
+    StopTimes: List[StopTimeDetail] = []
+    
 class Timetable(ms.Struct, kw_only=True):
     TripID: str
     IsLowFloor: bool
+    StopTimes: List[StopTime] = []    
     ServiceDay: ServiceDay
     SpecialDays: List[SpecialDay] = []
-    StopTimes: List[StopTime] = []
 
 class Schedule(ms.Struct, kw_only=True):
     RouteUID: str
-    RouteName: I18n
     SubRouteUID: str
-    SubRouteName: I18n
     Direction: int
     OperatorID: str
     Timetables: List[Timetable] = []
     Frequencys: List[Frequency] = []
-    UpdateTime: Optional[str] = None
+    UpdateTime: str
+
+class DailySchedule(ms.Struct, kw_only=True):
+    BusDate: Optional[str] = None
+    RouteUID: str
+    SubRouteUID: str
+    Direction: int
+    OperatorID: str
+    Timetables: List[DailyTimetable] = []
+    UpdateTime: str

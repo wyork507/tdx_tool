@@ -2,7 +2,7 @@
 from datetime import datetime
 from functools import cached_property
 from logging import Logger
-from typing import Literal
+from typing import Literal, TypeAlias, TypeVar
 import msgspec, requests
 import pandas as pd
 import geopandas as gpd
@@ -10,7 +10,17 @@ import geopandas as gpd
 from .parsers import _bus_parsers
 from .core import tdx_tool
 from .utils import BusRegion
-from .bus_models import RouteStops, Route, RouteShape, Operator, Alert, Schedule
+from .bus_models import RouteStops, Route, RouteShape, Operator, Alert, Schedule, DailySchedule
+
+
+RefreshableCacheProperty: TypeAlias = Literal[
+    "routes",
+    "stations",
+    "routes_with_shape",
+    "operators",
+    "schedules",
+    "daily_timetables",
+]
 
 class tdx_bus(tdx_tool):
     """
@@ -202,36 +212,39 @@ class tdx_bus(tdx_tool):
         )
     
     @cached_property
-    def route_departure_info(self) -> pd.DataFrame:
+    def schedules(self) -> pd.DataFrame:
         """
-        Fetch bus departure information for the specified region.
-        You can refresh the cache by `refresh_cache("route_departure_info")`.
+        Fetch bus stations timetable for the specified region.
+        You can refresh the cache by `refresh_cache("stations_timetable")`.
         """
         def decoder(response: requests.Response) -> list[Schedule]:
             return msgspec.json.decode(response.content, type=list[Schedule])
-        
+
         data = self._fetch_combined_data(
-            prefix="v2/Bus/",
+            prefix="v2/Bus/Schedule",
             params={
-                "$select": "TripID,RouteUID,SubRouteUID,Direction,TripDepTime"
+                "$select": "RouteUID,SubRouteUID,Direction,OperatorID,Timetables,Frequencys,UpdateTime"
             },
             decoder=decoder
         )
         return pd.DataFrame(data)
     
-    #@cached_property
-    #def stations_timetable(self) -> pd.DataFrame:
-        """
-        Fetch bus stations timetable for the specified region.
-        You can refresh the cache by `refresh_cache("stations_timetable")`.
+    @cached_property
+    def daily_timetables(self) -> pd.DataFrame:
         """
         """
-        def decoder(response: requests.Response) -> list[RouteStops]: # type: ignore
-            return msgspec.json.decode(response.content, type=list[RouteStops])
+        def decoder(response: requests.Response) -> list[DailySchedule]:
+            return msgspec.json.decode(response.content, type=list[DailySchedule])
 
-        data = self._parsers.parse_stations_timetable(self._route_stops)
+        data = self._fetch_combined_data(
+            prefix="v2/Bus/DailyTimeTable",
+            params={
+                "$select": "BusDate,RouteUID,SubRouteUID,Direction,OperatorID,Timetables,UpdateTime"
+            },
+            decoder=decoder
+        )
         return pd.DataFrame(data)
-        """
+
 
     @property
     def alert(self) -> list[Alert]:
@@ -257,17 +270,17 @@ class tdx_bus(tdx_tool):
         This may include weather-related disruptions, traffic incidents affecting bus routes, and other urgent notifications.
         """
         return self.alert
-        
+    
     def refresh_cache(
         self,
-        property_name: Literal["routes", "stations", "routes_with_shape", "operators", "route_departure_info", "all"] = "all"
+        property_name: RefreshableCacheProperty | Literal["all"]  = "all"
         ) -> None:
         """
         Manually refresh the cached data for a specific property.
         This is useful if you want to ensure you have the most up-to-date information without waiting for the cache to expire.
         """
-        refreshable_properties = {"routes", "stations", "routes_with_shape", "operators", "route_departure_info"}
-        refresh_targets: set[str] = set()
+        refreshable_properties = {"routes", "stations", "routes_with_shape", "operators", "schedules", "daily_timetables"}
+        refresh_targets: set[str]
         
         match property_name:
             case "all":
@@ -276,6 +289,7 @@ class tdx_bus(tdx_tool):
                 refresh_targets = {property_name}
             case _:
                 self.logger.warning(f"Invalid property name for cache refresh: {property_name}. Valid options are:\n\t {', '.join(refreshable_properties)}")
+                raise
         
         if refresh_targets & {"stations", "routes_with_shape"}:
             self.__dict__.pop("_route_stops", None)  # Clear the cached route stops if stations or routes_with_shape is being refreshed

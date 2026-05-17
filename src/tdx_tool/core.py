@@ -14,6 +14,7 @@ from .authority import tdx_auth
 from .utils import TDX_API_BASE as base_url
 
 T = TypeVar("T", bound=Struct)
+DataFrame = TypeVar("DataFrame", bound=pd.DataFrame|gpd.GeoDataFrame)
 
 class tdx_tool:
     """
@@ -80,6 +81,11 @@ class tdx_tool:
         if not isinstance(value, str):
             self.logger.error(f"Invalid value for output_path: {value}. Must be a string.")
             raise ValueError("output_path must be a string value.")
+        try:
+            os.makedirs(value, exist_ok=True) # Ensure the directory exists
+        except Exception as e:
+            self.logger.error(f"Error occurred while creating output directory: {e}")
+            raise e
         self.__output_path = value
         self.logger.info(f"Set output_path to {value}")
 
@@ -145,8 +151,8 @@ class tdx_tool:
         prefix: str,
         params: dict,
         decoder: Callable[[Response], list[T]],
-        parser: Callable[[list[T]], pd.DataFrame],
-    ) -> pd.DataFrame:
+        parser: Callable[[list[T]], DataFrame],
+    ) -> DataFrame:
         ...
     
     def _fetch_combined_data(
@@ -154,8 +160,8 @@ class tdx_tool:
         prefix: str,
         params: dict,
         decoder: Callable[[Response], list[T]],
-        parser: Callable[[list[T]], pd.DataFrame] | None = None
-    ) -> list[T] | pd.DataFrame:
+        parser: Callable[[list[T]], DataFrame] | None = None
+    ) -> list[T] | DataFrame:
         """
         Fetch data from the API for the specified endpoint template and parameters.
         Uses concurrent requests to fetch data from multiple endpoints simultaneously.
