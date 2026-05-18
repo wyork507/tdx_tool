@@ -1,5 +1,5 @@
 # Dependencies
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum, Enum
 from typing import List, Optional
 import msgspec as ms
@@ -122,20 +122,35 @@ class Stop(ms.Struct, kw_only=True):
 
 @dataclass(kw_only=True)
 class Station:
-    StationUID: str
+    StationUID: List[str]
     StationPosition: PointPosition
     StationName: I18n
     StationAddress: Optional[str] = None
     StationGroupID: Optional[str] = None
-    Stops: List[Stop] = [] # type: ignore
+    Stops: List[Stop] = field(default_factory=list)
     LocationCityCode: Optional[str] = None
     Bearing: Optional[str] = None
     UpdateTime: str
 
+    @classmethod
+    def from_fraction(cls, station: "StationFraction", stops: List[Stop]) -> "Station":
+        return cls(
+            StationUID=[station.StationUID],
+            StationPosition=station.StationPosition,
+            StationName=I18n(Zh_tw=stops[0].StopName.Zh_tw, En=stops[0].StopName.En),
+            StationAddress=station.StationAddress,
+            StationGroupID=stops[0].StationGroupID,
+            LocationCityCode=station.LocationCityCode,
+            Bearing=station.Bearing,
+            UpdateTime=station.UpdateTime
+        )
+
 class StationFraction(ms.Struct, kw_only=True):
     StationUID: str
+    StationPosition: PointPosition
     StationAddress: Optional[str] = None
     LocationCityCode: Optional[str] = None
+    Bearing: Optional[str] = None
     UpdateTime: str
     
 
@@ -200,7 +215,7 @@ class ServiceDay:
     Friday: int
     Saturday: int
     Sunday: int
-    NationalHolidays: int
+    NationalHolidays: Optional[int] = None
 
     def __item_for(self, boolean: bool, exclude: set[str] | None = None) -> list[str]:
         if exclude is None:
@@ -213,8 +228,8 @@ class ServiceDay:
         return result
     
     @property
-    def has_service_on_holidays(self) -> bool:
-        return self.NationalHolidays == 1
+    def has_service_on_holidays(self) -> bool | None:
+        return self.NationalHolidays == 1 if self.NationalHolidays is not None else None
     
     @property
     def flat(self) -> dict[str, bool]:

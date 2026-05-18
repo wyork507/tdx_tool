@@ -77,17 +77,39 @@ class _bus_parsers(_parsers):
             })
         return pd.DataFrame(data)
     
-    def parse_stations1(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, Station]:
+    def parse_stations(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, Station]:
         """
         """
-        from .bus_models import Stop
-        from .common_models import PointPosition, I18n
-        temp_data: dict[str, list[Stop]] = {}
+        from threading import Lock
+        from .bus_models import Stop, StationFraction
+
+        stops: dict[str, list[Stop]] = {}
         for route in route_stops:
             for s in route.Stops:
+                geohash: str = s.StopPosition.GeoHash
+                if geohash not in stops:
+                    stops.setdefault(geohash, [])
+                stops[geohash] += [s]
+        
+        data: dict[str, Station] = {}
+        hash_map: dict[str, set[str]] = {} # geohash -> StationUID
+        for station in station_fractions:
+            geohash = station.StationPosition.GeoHash
+            if geohash not in stops:
+                stops.setdefault(geohash, [])
+            if geohash not in hash_map:
+                hash_map.setdefault(geohash, set())
+                data[station.StationUID] = Station.from_fraction(
+                    station,
+                    stops[geohash]
+                )
+            else:
+                hash_map[geohash].add(station.StationUID)
+                self.logger.debug(f"Station {station.StationUID} shares geohash {geohash} with station(s) {hash_map[geohash]}")
+                data[station.StationUID].StationUID = list(hash_map[geohash])
+        return data
 
-
-    def parse_stations(self, route_stops: list[RouteStops]) -> pd.DataFrame:
+    def parse_stations_to_dataframe(self, route_stops: list[RouteStops]) -> pd.DataFrame:
         """
         """
         data = []
@@ -238,10 +260,9 @@ class _bus_parsers(_parsers):
                 data.extend(self.__parse_frequency(s))
         return pd.DataFrame(data)
 
-    def parse_schedules(self, schedules: list[Schedule | DailySchedule]) -> pd.DataFrame:
+    def parse_schedules(self, schedules: list[Schedule] | list[DailySchedule]) -> pd.DataFrame:
         """
         """
-        from .bus_models import Timetable
         data = []
         for s in schedules:
             if len(s.Timetables) > 0:
@@ -249,7 +270,3 @@ class _bus_parsers(_parsers):
             if isinstance(s, Schedule) and len(s.Frequencys) > 0:
                 data.extend(self.__parse_frequency(s))
         return pd.DataFrame(data)
-
-class _rail_parsers(_parsers):
-    def __init__(self, logger: Logger):
-        super().__init__(logger)

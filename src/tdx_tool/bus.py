@@ -7,11 +7,10 @@ import msgspec, requests
 import pandas as pd
 import geopandas as gpd
 # Local imports
-from .parsers import _bus_parsers
+from .bus_parsers import _bus_parsers
 from .core import tdx_tool
 from .utils import BusRegion
 from .bus_models import RouteStops, Route, RouteShape, Station, Operator, Alert, Schedule, DailySchedule
-
 
 RefreshableCacheProperty: TypeAlias = Literal[
     "routes",
@@ -197,30 +196,28 @@ class tdx_bus(tdx_tool):
         def decoder(response: requests.Response) -> list[StationFraction]:
             return msgspec.json.decode(response.content, type=list[StationFraction])
 
-        fraction = self._fetch_combined_data(
-            prefix="v2/Bus/Station",
-            params={
-                "$select": "StationUID,StationAddress,LocationCityCode,UpdateTime"
-            },
-            decoder=decoder
-        )
-        fraction_dict = {f.StationUID: f for f in fraction}
-
-
-
-        data = self._parsers.parse_stations(self._route_stops)
+        return list(self._parsers.parse_stations(
+            self._route_stops,
+            self._fetch_combined_data(
+                prefix="v2/Bus/Station",
+                params={
+                    "$select": "StationUID,StationPosition,StationAddress,LocationCityCode,Bearing,UpdateTime"
+                },
+                decoder=decoder
+            )
+        ).values())
+    
+    @cached_property
+    def stations_to_dataframe(self) -> pd.DataFrame:
+        data = self._parsers.parse_stations_to_dataframe(self._route_stops)
         data = data.sort_values(by=["StationID", "SubRouteNameEn", "Sequence"]).reset_index(drop=True)
         coor = data[["PositionLon", "PositionLat"]]
         self.logger.debug(f"Creating GeoDataFrame with {len(data)} stations.")
         return gpd.GeoDataFrame(
-                data.drop(columns=["PositionLon", "PositionLat"]),
-                geometry = gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
-                crs = self.default_coor
-            )
-    
-    @cached_property
-    def stations_to_dataframe(self) -> pd.DataFrame:
-
+            data.drop(columns=["PositionLon", "PositionLat"]),
+            geometry = gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
+            crs = self.default_coor
+        )
     
     @cached_property
     def operators(self) -> pd.DataFrame:
@@ -241,7 +238,7 @@ class tdx_bus(tdx_tool):
         )
     
     @cached_property
-    def schedules(self) -> pd.DataFrame:
+    def schedules(self) -> list[Schedule]:
         """
         Fetch bus stations timetable for the specified region.
         You can refresh the cache by `refresh_cache("stations_timetable")`.
@@ -249,30 +246,44 @@ class tdx_bus(tdx_tool):
         def decoder(response: requests.Response) -> list[Schedule]:
             return msgspec.json.decode(response.content, type=list[Schedule])
 
-        data = self._fetch_combined_data(
+        return self._fetch_combined_data(
             prefix="v2/Bus/Schedule",
             params={
                 "$select": "RouteUID,SubRouteUID,Direction,OperatorID,Timetables,Frequencys,UpdateTime"
             },
             decoder=decoder
         )
-        return pd.DataFrame(data)
     
     @cached_property
-    def daily_timetables(self) -> pd.DataFrame:
+    def schedules_to_dataframe(self) -> pd.DataFrame:
+        """
+        Fetch bus stations timetable for the specified region, then cache it.
+        You can refresh the cache by `refresh_cache("stations_timetable")`.
+        """
+        return self._parsers.parse_schedules(
+            self.schedules
+        ).sort_values(by=["RouteUID", "SubRouteUID", "Direction", "OperatorID"]).reset_index(drop=True)
+            
+    @cached_property
+    def daily_timetables(self) -> list[DailySchedule]:
         """
         """
         def decoder(response: requests.Response) -> list[DailySchedule]:
             return msgspec.json.decode(response.content, type=list[DailySchedule])
 
-        data = self._fetch_combined_data(
+        return self._fetch_combined_data(
             prefix="v2/Bus/DailyTimeTable",
             params={
                 "$select": "BusDate,RouteUID,SubRouteUID,Direction,OperatorID,Timetables,UpdateTime"
             },
             decoder=decoder
         )
-        return pd.DataFrame(data)
+    
+    @cached_property
+    def daily_timetables_to_dataframe(self) -> pd.DataFrame:
+        return self._parsers.parse_schedules(
+            self.daily_timetables
+        )
 
 
     @property
