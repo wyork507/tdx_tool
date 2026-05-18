@@ -120,16 +120,24 @@ class Stop(ms.Struct, kw_only=True):
     StationID: str
     StationGroupID: Optional[str] = None
 
-class Station(ms.Struct, kw_only=True):
+@dataclass(kw_only=True)
+class Station:
     StationUID: str
     StationPosition: PointPosition
-    StationName: Optional[I18n] = None
+    StationName: I18n
     StationAddress: Optional[str] = None
     StationGroupID: Optional[str] = None
     Stops: List[Stop] = [] # type: ignore
     LocationCityCode: Optional[str] = None
     Bearing: Optional[str] = None
     UpdateTime: str
+
+class StationFraction(ms.Struct, kw_only=True):
+    StationUID: str
+    StationAddress: Optional[str] = None
+    LocationCityCode: Optional[str] = None
+    UpdateTime: str
+    
 
 class RouteStops(ms.Struct, kw_only=True):
     RouteUID: str

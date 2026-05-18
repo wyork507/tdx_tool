@@ -10,7 +10,7 @@ import geopandas as gpd
 from .parsers import _bus_parsers
 from .core import tdx_tool
 from .utils import BusRegion
-from .bus_models import RouteStops, Route, RouteShape, Operator, Alert, Schedule, DailySchedule
+from .bus_models import RouteStops, Route, RouteShape, Station, Operator, Alert, Schedule, DailySchedule
 
 
 RefreshableCacheProperty: TypeAlias = Literal[
@@ -59,7 +59,7 @@ class tdx_bus(tdx_tool):
         self._parsers = _bus_parsers(self.logger)
 
     @classmethod
-    def from_region_str(cls, client_id: str, client_key: str, region: str, logger: Logger | None = None):
+    def from_region_str(cls, client_id: str, client_key: str, region: str, logger: Logger | None = None) -> "tdx_bus":
         """
         Enter a name string, such as "Taipei" or "Hsinchu", to initialize the class with the corresponding region.
         ---
@@ -106,7 +106,7 @@ class tdx_bus(tdx_tool):
     
     @property
     def region(self) -> BusRegion:
-        return self.__region        
+        return self.__region
     
     def _url_middle_part(self) -> list[str]:
         if self.__region == BusRegion.Intercity:
@@ -135,54 +135,79 @@ class tdx_bus(tdx_tool):
         )
     
     @cached_property
-    def routes(self) -> pd.DataFrame:
-        """
-        Fetch bus routes for the specified region, then cache it.
-        You can refresh the cache by `refresh_cache("routes")`.
-        """
+    def routes(self) -> list[Route]:
         def decoder(response: requests.Response) -> list[Route]:
             return msgspec.json.decode(response.content, type=list[Route])
-        # Main logic
+        
         return self._fetch_combined_data(
             prefix="v2/Bus/Route",
             params={
                 "$select": "RouteUID,Operators,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
             },
-            decoder=decoder,
-            parser=self._parsers.parse_routes
+            decoder=decoder
+        )
+    
+    @cached_property
+    def routes_to_dataframe(self) -> pd.DataFrame:
+        """
+        Fetch bus routes for the specified region, then cache it.
+        You can refresh the cache by `refresh_cache("routes")`.
+        """
+        return self._parsers.parse_routes(
+            self.routes
         ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
     
     @cached_property
-    def routes_with_shape(self) -> gpd.GeoDataFrame:
-        """
-        Fetch bus routes with shape information for the specified region, then cache it.
-        You can refresh the cache by `refresh_cache("routes_with_shape")`.
-        """
-        def decoder(response: requests.Response) -> list[RouteShape]: # type: ignore
+    def routes_with_shape(self) -> list[RouteShape]:
+        def decoder(response: requests.Response) -> list[RouteShape]:
             return msgspec.json.decode(response.content, type=list[RouteShape])
         # Main logic
-        data = self._fetch_combined_data(
+        return self._fetch_combined_data(
             prefix="v2/Bus/Shape",
             params={
                 "$select": "RouteUID,SubRouteUID,RouteName,Direction,Geometry,EncodedPolyline,UpdateTime"
             },
-            decoder=decoder,
-            parser=self._parsers.parse_route_with_shape
+            decoder=decoder
+        )
+
+    @cached_property
+    def routes_with_shape_to_dataframe(self) -> gpd.GeoDataFrame:
+        """
+        Fetch bus routes with shape information for the specified region, then cache it.
+        You can refresh the cache by `refresh_cache("routes_with_shape")`.
+        """
+        data = self._parsers.parse_route_with_shape(
+            self.routes_with_shape
         ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
         data = data.join(
-            self.routes.set_index(["RouteUID", "SubRouteUID"]),
+            self.routes_to_dataframe.set_index(["RouteUID", "SubRouteUID"]),
             on=["RouteUID", "SubRouteUID"],
             how="left",
             rsuffix="_route"
-            )
+        )
         return gpd.GeoDataFrame(data, geometry="geometry", crs=self.default_coor)
 
     @cached_property
-    def stations(self) -> gpd.GeoDataFrame:
+    def stations(self) -> list[Station]:
         """
         Fetch bus stations for the specified region.
         You can refresh the cache by `refresh_cache("stations")`.
         """
+        from .bus_models import StationFraction
+        def decoder(response: requests.Response) -> list[StationFraction]:
+            return msgspec.json.decode(response.content, type=list[StationFraction])
+
+        fraction = self._fetch_combined_data(
+            prefix="v2/Bus/Station",
+            params={
+                "$select": "StationUID,StationAddress,LocationCityCode,UpdateTime"
+            },
+            decoder=decoder
+        )
+        fraction_dict = {f.StationUID: f for f in fraction}
+
+
+
         data = self._parsers.parse_stations(self._route_stops)
         data = data.sort_values(by=["StationID", "SubRouteNameEn", "Sequence"]).reset_index(drop=True)
         coor = data[["PositionLon", "PositionLat"]]
@@ -192,6 +217,10 @@ class tdx_bus(tdx_tool):
                 geometry = gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
                 crs = self.default_coor
             )
+    
+    @cached_property
+    def stations_to_dataframe(self) -> pd.DataFrame:
+
     
     @cached_property
     def operators(self) -> pd.DataFrame:

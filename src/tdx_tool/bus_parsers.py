@@ -1,33 +1,12 @@
 # Dependencies
-from datetime import datetime, time, date
 from logging import Logger
 import pandas as pd
 import geopandas as gpd
 import shapely
 # Local imports
-from .bus_models import DailySchedule, Route, RouteShape, RouteStops, Alert, Schedule, Operator
-from .bike_models import Station, Availability
-from .common_models import I18n
+from .common_parsers import _parsers
+from .bus_models import DailySchedule, Route, RouteShape, RouteStops, Alert, Schedule, Operator, StationFraction, Station
 
-class _parsers:
-    def __init__(self, logger: Logger):
-        self.logger = logger
-
-    def decoding_datetime(self, dt_str: str) -> pd.Timestamp:
-        return pd.to_datetime(
-            dt_str
-        )
-    
-    def decode_time(self, t_str: str | None) -> time | None:
-        return pd.to_datetime(
-            t_str,
-            format = "%H:%M"
-        ).time() if t_str else None
-    
-    def decode_date(self, date_str: str | None) -> date | None:
-        return pd.to_datetime(
-            date_str
-        ).date() if date_str else None
 
 class _bus_parsers(_parsers):
     def __init__(self, logger: Logger):
@@ -98,6 +77,16 @@ class _bus_parsers(_parsers):
             })
         return pd.DataFrame(data)
     
+    def parse_stations1(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, Station]:
+        """
+        """
+        from .bus_models import Stop
+        from .common_models import PointPosition, I18n
+        temp_data: dict[str, list[Stop]] = {}
+        for route in route_stops:
+            for s in route.Stops:
+
+
     def parse_stations(self, route_stops: list[RouteStops]) -> pd.DataFrame:
         """
         """
@@ -211,7 +200,7 @@ class _bus_parsers(_parsers):
                         **route_base,
                         **trip_base,
                         "StopSequence": stop.StopSequence,
-                        "ServiceDate": self.decode_date(schedule.BusDate),
+                        "ServiceDate": self.decode_date(schedule.BusDate), # type: ignore
                         **stop.StopName.flat("StopName"),
                         "ArrivalTime": self.decode_time(stop.ArrivalTime),
                         "DepartureTime": self.decode_time(stop.DepartureTime),
@@ -260,48 +249,7 @@ class _bus_parsers(_parsers):
             if isinstance(s, Schedule) and len(s.Frequencys) > 0:
                 data.extend(self.__parse_frequency(s))
         return pd.DataFrame(data)
-    
-class _bike_parsers(_parsers):
-    def __init__(self, logger: Logger):
-        super().__init__(logger)
-    
-    def parse_stations(self, stations: list[Station]) -> pd.DataFrame:
-        """
-        """
-        data = []
-        for s in stations:
-            data.append({
-                "StationUID": s.StationUID,
-                **s.StationName.flat("StationName"),
-                "StationPosition": s.StationPosition,
-                **s.StationAddress.flat("StationAddress"),
-                "StopDescription": s.StopDescription,
-                "BikesCapacity": s.BikesCapacity,
-                "ServiceType": s.ServiceType,
-                "UpdateTime": self.decoding_datetime(s.UpdateTime),
-                **s.StationPosition.flat_without_prefix
-            })
-        return pd.DataFrame(data)
-    
-    def parse_availability(self, availability: list[Availability]) -> pd.DataFrame:
-        """
-        """
-        data = []
-        for a in availability:
-            base = {
-                "StationUID": a.StationUID,
-                "ServiceStatus": a.ServiceStatus,
-                "AvailableRentBikes": a.AvailableRentBikes,
-                "AvailableReturnBikes": a.AvailableReturnBikes,
-                "UpdateTime": self.decoding_datetime(a.UpdateTime)
-            }
-            if a.AvailableRentBikesDetail is not None:
-                base["AvailableGeneralBikes"] = a.AvailableRentBikesDetail.GeneralBikes
-                base["AvailableElectricBikes"] = a.AvailableRentBikesDetail.ElectricBikes
-            data.append(base)
-        return pd.DataFrame(data)
 
 class _rail_parsers(_parsers):
     def __init__(self, logger: Logger):
         super().__init__(logger)
-        
