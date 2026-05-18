@@ -25,6 +25,77 @@ class tdx_bus(tdx_tool):
     """
     A tool for getting bus-related data from the TDx API.
     
+    Parameters
+    ----------
+    client_id: str
+        TDX API Client ID (required)
+    client_key: str
+        TDX API Client Key (required)
+    region: BusRegion, default=BusRegion.Intercity
+        The region for which to fetch bus data.
+    logger: Logger, optional
+        Logger instance for logging. If not provided, a default logger that does not output anywhere will be used.
+    
+    Attributes
+    ----------
+    auth: tdx_auth
+        an instance of `tdx_auth` for handling authentication
+    logger: Logger
+        a Logger instance for logging
+    export_result: bool
+        whether to export results
+    default_coor: str, default="EPSG:4326"
+        specifies the default coordinate reference system for geospatial data (default is WGS 84)
+    output_path: str, default="output"
+        the directory path where output files will be saved (default is "output")
+    region: BusRegion (read-only)
+        where the bus data is fetched for
+    together: bool, default=False | None (adjustable)
+        whether to fetch data for both regions with ambiguous name
+        - `bool` for regions with ambiguous name
+        - `None` for non-ambiguous region
+    routes: list[Route] (cached)
+        all bus routes for the region(s)
+    routes_to_dataframe: pd.DataFrame (cached)
+        all bus routes for the region(s), in a tabular format
+    routes_with_shape: list[RouteShape] (cached)
+        all bus routes with shape information for the region(s)
+    routes_with_shape_to_dataframe: gpd.GeoDataFrame (cached)
+        all bus routes with shape information for the region(s), in a tabular format with geometry, joined with `routes_to_dataframe` for more details
+    stations: list[Station] (cached)
+        all bus stations for the region(s)
+    stations_to_dataframe: gpd.GeoDataFrame (cached)
+        all bus stations for the region(s), in a tabular format with geometry
+    operators: list[Operator] (cached)
+        all bus operators for the region(s)
+    operators_to_dataframe: pd.DataFrame (cached)
+        all bus operators for the region(s), in a tabular format
+    schedules: list[Schedule] (cached)
+        all bus schedules for the region(s)
+    schedules_to_dataframe: pd.DataFrame (cached)
+        all bus schedules for the region(s), in a tabular format
+    daily_timetables: list[DailySchedule] (cached)
+        all bus daily timetables for the region(s)
+    daily_timetables_to_dataframe: pd.DataFrame (cached)
+        all bus daily timetables for the region(s), in a tabular format
+    alert: list[Alert] (cached)
+        current alerts and warnings for bus services in the region(s)
+    operate_status: list[Alert] (cached)
+        Same as `alert` above
+    
+    Methods
+    -------
+    refresh_cache(property_name: RefreshableCacheProperty | Literal["all"]) -> None
+        see `refresh_cache` method for details.
+    get_schedule_for_route(route_name: str, only_departures: bool = False) -> pd.DataFrame
+        see `get_schedule_for_route` method for details.
+    fetch_estimated_arrival_for_routes(route_name: str) -> pd.DataFrame
+        see `fetch_estimated_arrival_for_routes` method for details.
+    fetch_estimated_arrival_for_stations(station_uid: str) -> pd.DataFrame
+        see `fetch_estimated_arrival_for_stations` method for details.
+    
+    Examples
+    --------
     When initializing, you can specify the region you want to fetch data for using the `region` parameter.
     >>> bus_tool = tdx_bus(client_id="your_client_id", client_key="your_client_key", region=BusRegion.Taipei)
     Or you can use the `from_region_str` class method to initialize with a region name string:
@@ -33,10 +104,6 @@ class tdx_bus(tdx_tool):
     Note that some regions have ambiguous names (e.g., "Hsinchu" and "HsinchuCounty"). If you want to fetch data for
     both regions, set the `together` property to True:
     >>> bus_tool.together = True
-    
-    ---
-    Attributes:
-
     """
     def __init__(self,
         client_id: str, client_key: str,
@@ -61,18 +128,28 @@ class tdx_bus(tdx_tool):
     def from_region_str(cls, client_id: str, client_key: str, region: str, logger: Logger | None = None) -> "tdx_bus":
         """
         Enter a name string, such as "Taipei" or "Hsinchu", to initialize the class with the corresponding region.
-        ---
-        Parameters:
-        - `client_id`: Your TDx API client ID.
-        - `client_key`: Your TDx API client key.
-        - `region`: The name of the region you want to fetch data for.
-        ---
-        Returns:
+        If the name is ambiguous (see `BusRegion` enum for details), the default will be the main city with it related
+        county (or Taipei for New Taipei), 
+        
+        Parameters
+        ----------
+        client_id: str
+            TDX API Client ID (required)
+        client_key: str
+            TDX API Client Key (required)
+        region: str
+            the name of the region you would like to fetch data for
+        
+        Returns
+        -------
+        tdx_bus
             An instance of `tdx_bus` initialized for the specified region.
-            Note that if the region name is ambiguous, default for together will be False.
-        ---
-        Raises:
-            ValueError: If the input string does not match any known region.
+            - Note that if the region name is ambiguous, default for together will be `True`.
+        
+        Raises
+        ------
+        ValueError
+            the input string does not match any known region.
         """
         from .utils import string_into_identity as convertor
         try:
@@ -90,8 +167,10 @@ class tdx_bus(tdx_tool):
         logger: Logger | None = None
     ) -> "tdx_bus":
         """ 
-        Returns:
-            An instance of `tdx_bus` initialized for the Intercity region, which includes all intercity bus routes across Taiwan.
+        Returns
+        -------
+        tdx_bus
+            An instance of `tdx_bus` initialized for intercity bus data.
         """
         return cls(client_id=client_id, client_key=client_key, logger=logger)
 

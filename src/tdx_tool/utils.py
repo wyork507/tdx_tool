@@ -36,16 +36,19 @@ ZONES: dict[str, Identity] = {
     "LIE": Identity("LIE", "連江縣", "Lienchiang County","LienchiangCounty")
 }
 
-def string_into_identity(region: str) -> Optional[Identity]:
+def string_into_identity(region: str) -> Identity:
     """
-    ---
-    Parameters:
-        region: A string representing the region name, which can be in either Chinese or English.
-    Returns:
-        An Identity object corresponding to the region if a match is found, or None if no match
-        is found.
-    Raises:
-        ValueError: If the input string does not match any known region names.
+    Convert a region name string into a related Identity object.
+
+    Parameters
+    ----------
+    region: str
+        The region name, can be in English or Chinese
+    
+    Raises
+    ------
+    ValueError
+        If the input string does not match any known region names
     """
     region_split = region.split()
     if region_split in [["New", "Taipei"]] or region.capitalize().startswith("NewTaipei"):
@@ -83,6 +86,27 @@ def string_into_identity(region: str) -> Optional[Identity]:
     raise ValueError(f"Invalid region name: {region}. Valid options are: {', '.join(key for r in regions for key in r.keys())}.")
 
 def strings_into_identities(regions: list[str], ignore_invalid: bool = False) -> list[Optional[Identity]]:
+    """
+    Convert a list of region name strings into a list of related Identity objects.
+
+    Parameters
+    ----------
+    regions: list[str]
+        A list of region names, can be in English or Chinese
+    ignore_invalid: bool
+        If `True`, unconvertable region names will be ignored and set as `None` in the output list.
+        If `False`, a `ValueError` will be raised when an unconvertable region name is encountered.
+    
+    Returns
+    -------
+    list[Optional[Identity]]
+        A list of Identity objects corresponding to the input region names, with invalid names set to `None` if `ignore_invalid` is `True`.
+
+    Raises
+    ------
+    ValueError
+        For any string can't be converted and `ignore_invalid` is `False`.
+    """
     identities: list[Optional[Identity]] = []
     for region in regions:
         try:
@@ -124,38 +148,46 @@ class BusRegion(Enum):
 
     @property
     def isCounty(self) -> bool:
-        """
-        Returns True if the region is a county (i.e., its name ends with "County"), False otherwise.
-        """
+        """Returns `True` if the region is a county, and `False` if it's a city or intercity."""
         return self.value.api_tag.endswith("County")
     
     @property
     def code(self) -> str:
-        """
-        Returns the 3-digit code used in the prefix of UID encoding.
-        """
+        """The 3 digit code representing the region."""
         return self.value.code
     
     @property
     def names(self) -> list[str]:
-        """
-        The name of the region in both Chinese and English, used for display purposes.
-        """
+        """The name of the region in both Chinese and English, used for display purposes."""
         return [self.value.zh, self.value.en]
     
     @property
     def api_tag(self) -> str:
-        """
-        Return the api_tag used in the TDX API endpoint URLs for this region.
-        """
+        """Return the api_tag used in the TDX API endpoint URLs for this region."""
         return self.value.api_tag
 
     @cached_property
     def ambiguous_case(self) -> "BusRegion | None":
         """
         Returns the ambiguous region name if it exists.
-        For example, *Hsinchu* and *HsinchuCounty* are ambiguous because they both contain *Hsinchu*.
-        If there is no ambiguity, returns None.
+        
+        The ambiguous region name are those shared by multiple regions, which can cause confusion when
+        only the name is provided without the code.
+        
+        For example, *Hsinchu* and *HsinchuCounty* are ambiguous because they both contain *Hsinchu*,
+        in this case, the `ambiguous_case` property will return the other region that shares the same name.
+        
+        Here are the examples of *Hsinchu* and *HsinchuCounty*, and you can see that they are ambiguous to
+        each other:
+        >>> BusRegion.Hsinchu.ambiguous_case
+        <BusRegion.HsinchuCity: Identity(code='HSZ', zh='新竹市', en='Hsinchu City', api_tag='HsinchuCity')>       
+        >>> BusRegion.HsinchuCounty.ambiguous_case
+        <BusRegion.Hsinchu: Identity(code='HSQ', zh='新竹縣', en='Hsinchu County', api_tag='HsinchuCounty')>
+
+        However, if there is no ambiguity, the `ambiguous_case` property will return `None`. For example,
+        *Taichung* is not ambiguous because there is only one region with *Taichung* in its name:
+        >>> BusRegion.Taichung.ambiguous_case
+        None
         """
         ambiguos: dict[str, set[Identity]] = {
             "Hsinchu": set([ZONES["HSZ"], ZONES["HSQ"]]),
@@ -195,6 +227,7 @@ class BikeRegion(Enum):
 
     @property
     def bike_type(self) -> list[ServiceType]:
+        """Return the bike service type(s) available in this region."""
         match self:
             case BikeRegion.Changhua | BikeRegion.Yunlin:
                 return [ServiceType.Moovo]
@@ -205,9 +238,7 @@ class BikeRegion(Enum):
     
     @property
     def api_tag(self) -> str:
-        """
-        Return the api_tag used in the TDX API endpoint URLs for this region.
-        """
+        """Return the api_tag used in the TDX API endpoint URLs for this region."""
         return self.value.api_tag
 
 class RailwayOperator(Enum):
@@ -221,11 +252,11 @@ class RailwayOperator(Enum):
         "TRA"
     )
     """
-    If you are fetching data from TDx API, you would still receive the oudated details
-    with `TRA` tag and the name of "臺灣鐵路管理局" (Taiwan Railway Administration).
+    If you are fetching data from TDx API, you would still receive the oudated details with `TRA` tag and
+    the name of "臺灣鐵路管理局" (Taiwan Railway Administration).
 
-    But the TRA was companilze and changed its name to Taiwan Railway Corporation in 2024,
-    so I use the updated name and keep the api_tag in the code.
+    But the TRA was companilze and changed its name to Taiwan Railway Corporation in 2024, so I use the
+    updated name and keep the api_tag in the code.
     """
     INTER_HSR = Identity(
         "THSR",
@@ -266,13 +297,12 @@ class RailwayOperator(Enum):
 
     @property
     def api_tag(self) -> str:
-        """
-        Return the api_tag used in the TDX API endpoint URLs for this railway operator.
-        """
+        """Return the api_tag used in the TDX API endpoint URLs for this railway operator."""
         return self.value.api_tag
     
     @property
     def isMetro(self) -> bool:
+        """Returns `True` if the railway operator is a metro system, and `False` if it's an intercity railway."""
         if self.name.startswith("METRO"):
             return True
         else:
@@ -281,10 +311,17 @@ class RailwayOperator(Enum):
     @property
     def subRailSystem(self) -> dict[str, str] | None:
         """
-        In TDx API, the metro systems might have multiple `RailSystem`s belonging to the same `RailwayOperator`.
-        This property will only retrun that more than one `RailSystem` exists for the `RailwayOperator`.
-        Otherwise, it will return None, and you can directly use the `api_tag` property for API calls.
-        Retruns the `RailSystem`s that belong to the `RailwayOperator`
+        Returns
+        -------
+        dict[str, str]
+            A dictionary of sub-rail systems under the railway operator.
+            [sub_system_api_tag: sub_system_name_in_english]
+        None
+            Not a metro system nor there is no sub-rail system under this metro operator.
+
+        In TDx API, the metro systems might have multiple `RailSystem`s belonging to the same `RailwayOperator`,
+        thus this property will return the sub-rail systems if there are more than one `RailSystem`s under the
+        `RailwayOperator`.
         """
         match self:
             case RailwayOperator.METRO_TPE:
@@ -330,10 +367,12 @@ class RailwayRegion(Enum):
 
     @property
     def hasTRC(self) -> bool:
+        """is covered by Taiwan Railway Corporation (TRA) service"""
         return True
     
     @property
     def hasHSR(self) -> bool:
+        """is covered by Taiwan High Speed Rail (THSR) service"""
         if self in [
             RailwayRegion.Keelung,
             RailwayRegion.HsinchuCity,
@@ -349,6 +388,7 @@ class RailwayRegion(Enum):
     
     @property
     def hasMetro(self) -> bool:
+        """is covered by metro service"""
         if self in [
             RailwayRegion.Taipei,
             RailwayRegion.New_Taipei,
@@ -362,6 +402,7 @@ class RailwayRegion(Enum):
 
     @property
     def operators(self) -> list[RailwayOperator]:
+        """the operators that have railway service in the region"""
         ops = []
         if self.hasTRC:
             ops.append(RailwayOperator.INTER_TRC)

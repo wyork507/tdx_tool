@@ -18,20 +18,35 @@ DataFrame = TypeVar("DataFrame", bound=pd.DataFrame|gpd.GeoDataFrame)
 
 class tdx_tool:
     """
-    Do NOT use tdx_tool directly. Use one of its subclasses for specific data retrieval.
+    **Do NOT use tdx_tool directly**. Use one of its subclasses for specific data retrieval.
     
     Subclasses list:
     - `tdx_bus`: For bus-related data
     - `tdx_rail`: For railway-related data
     - `tdx_bike`: For bike-sharing-related data
-    ---
-    General Attributes:
-        auth: An instance of `tdx_auth` for handling authentication
-        logger: Logger instance for logging
-        export_result: Boolean indicating whether to export results
+    
+    General Attributes
+    ------------------
+    auth: tdx_auth
+        an instance of `tdx_auth` for handling authentication
+    logger: Logger
+        a Logger instance for logging
+    export_result: bool
+        whether to export results
+    default_coor: str, default="EPSG:4326"
+        specifies the default coordinate reference system for geospatial data (default is WGS 84)
+    output_path: str, default="output"
+        the directory path where output files will be saved (default is "output")
+    
+    Output Formats
+    --------------
+    - For tabular data: csv(.csv), parquet(.parquet), json(.json)
+    - For geospatial data: shapefile(.shp), geojson(.geojson)
     """
     FORM_OUTPUT_TYPE = Literal["csv", "parquet", "json"]
+    """Supported output formats for tabular data."""
     GEOG_OUTPUT_TYPE = Literal["shapefile", "geojson"]
+    """Supported output formats for geospatial data."""
 
     def __init__(self, client_id: str, client_key: str, logger: Logger | None = None):
         self.logger = logger or logging.getLogger(__name__)
@@ -94,6 +109,29 @@ class tdx_tool:
         params: dict | None = None,
         counter: int = 2
     ) -> requests.Response:
+        """
+        Parameters
+        ----------
+        suffix_url: str
+            The suffix part of the API endpoint URL to fetch data from (e.g., `v2/Bus/Route`).
+        params: dict | None
+            Optional dictionary of query parameters to include in the API request.
+        counter: int, default=2
+            The number of retry attempts remaining for handling rate limits and transient errors (default is 2).
+        
+        Raises
+        ------
+        requests.exceptions.Timeout
+            No response received over 10 seconds while trying to fetch data from the API.
+        requests.exceptions.HTTPError
+            Non-successful HTTP status code received while trying to fetch data from the API.
+            - 401 Unauthorized errors, the method will attempt to refresh the token and retry once before raising an exception.
+            - 429 Too Many Requests errors, the method will implement an exponential backoff strategy, and retry up to 3 times
+              before giving up and raising an exception.
+            - For other types of HTTP errors, the method will retry once after a short delay before raising an exception.
+        RuntimeError
+            Failed to fetch data due to unknown reasons.
+        """
         url = f"{base_url}{suffix_url}"
         self.logger.info(f"Making GET request to URL: {url}")
         response: requests.Response | None = None
@@ -111,7 +149,7 @@ class tdx_tool:
                     self.auth.update_token() # Refresh token
                     return self._get_data_from_suffix_url(suffix_url, params, counter) # Retry immediately after refreshing token
                 case 429: # Too Many Requests - rate limit exceeded
-                    if counter > 0:
+                    if counter >= 0:
                         wait_time: int = 4**(-counter+2) # Exponential backoff: 16, 4, 1 seconds
                         self.logger.debug(f"Received 429 Too Many Requests. Waiting for {wait_time} seconds before retrying...")
                         time.sleep(wait_time)
@@ -121,7 +159,7 @@ class tdx_tool:
                         self.logger.error(f"Due to repeated 429 Too Many Requests, no more retries will be attempted for URL: {url}")
                         raise
                 case _:
-                    if counter > 0: # For other types of errors, we can attempt a retry with a short delay
+                    if counter >= 0: # For other types of errors, we can attempt a retry with a short delay
                         self.logger.debug(f"Failed due to: {e}. Waiting for 1 second before retrying...")
                         time.sleep(1)
                         self.logger.info(f"Retrying... ({counter} attempts left)")
@@ -169,11 +207,15 @@ class tdx_tool:
 
         Parameters
         ----------
-        prefix : A string template for the API endpoint, with a placeholder for the middle part
-            example: `v2/Bus/Route`
-        params : A dictionary of query parameters to include in the API request
-        decoder : A function to decode the API response into a pandas DataFrame
-        parser : A function to parse the decoded data into a pandas DataFrame, or None to return the raw decoded data
+        prefix: str
+            A string template for the API endpoint, with a placeholder for the middle part
+            - example: `v2/Bus/Route`
+        params: dict
+            A dictionary of query parameters to include in the API request
+        decoder: Callable[[Response], list[T]]
+            A function to decode the API response into a pandas DataFrame
+        parser: Callable[[list[T]], DataFrame] | None
+            A function to parse the decoded data into a pandas DataFrame, or None to return the raw decoded data
         """
         data: list[T] = []
         

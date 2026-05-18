@@ -85,17 +85,22 @@ class TestTdxAuth:
             # If implementation refreshes token, post count should increase
             assert token == mock_token["access_token"]
 
-    def test_update_token_network_error(self, test_credentials, mock_logger):
-        """Test handling of network errors during token fetch."""
-        with patch('src.tdx_tool.authority.post') as mock_post:
-            mock_post.side_effect = requests.ConnectionError("Network error")
+    def test_token_refresh_keeps_cached_token_on_network_error(self, test_credentials, mock_token, mock_logger):
+        """Test that a refresh failure keeps the last cached token available."""
+        auth = tdx_auth(
+            client_id=test_credentials["client_id"],
+            client_key=test_credentials["client_key"],
+            logger=mock_logger
+        )
 
-            with pytest.raises(requests.ConnectionError):
-                tdx_auth(
-                    client_id=test_credentials["client_id"],
-                    client_key=test_credentials["client_key"],
-                    logger=mock_logger
-                )
+        auth._token = mock_token["access_token"]
+        auth._expire_time = 0
+
+        with patch.object(auth, 'update_token', side_effect=requests.ConnectionError("Network error")) as mock_refresh:
+            token = auth.token
+
+            assert token == mock_token["access_token"]
+            mock_refresh.assert_called_once()
 
     def test_callable_interface(self, test_credentials, mock_token, mock_logger):
         """Test that tdx_auth can be called as a function."""
