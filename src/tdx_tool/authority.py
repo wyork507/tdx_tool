@@ -6,7 +6,17 @@ from threading import Lock
 # Local imports
 from .utils import TDX_AUTH
 
-class tdx_auth:
+class _tdx_auth_meta(type):
+    _instances = {}
+    _lock = Lock()
+    def __call__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls not in cls._instances:
+                instance = super().__call__(*args, **kwargs)
+                cls._instances[cls] = instance
+            return cls._instances[cls]
+
+class tdx_auth(metaclass=_tdx_auth_meta):
     """
     A class that manages TDX API authentication tokens with automatic refresh and caching.
     
@@ -67,7 +77,6 @@ class tdx_auth:
         self._expire_time = self.__timenow - 60 # Force initial token retrieval
         self.logger.debug(f"[TDXAuth]-Initialized: {client_id}")
         self._token_lock = Lock() # Lock for thread-safe token refresh
-        self.__is_first_fetch = True # Flag to indicate if it's the first token fetch
     
     @classmethod
     def without_logger(cls, client_id: str, client_key: str) -> "tdx_auth":
@@ -175,7 +184,7 @@ class tdx_auth:
         return self.token
     
     def __str__(self) -> str:
-        return f"tdx_auth(client_id={self.client_id}, expire_time={self.expire_time})"
+        return f"tdx_auth(client_id={self.client_id}, expire_time={self.expire_time.strftime('%Y-%m-%d %H:%M:%S')})"
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -184,6 +193,6 @@ class tdx_auth:
         return f"""
         tdx_auth
         client_id: {self.client_id}
-        expire_time: {self.expire_time}
+        expire_time: {self.expire_time.strftime('%Y-%m-%d %H:%M:%S')}
         """
     

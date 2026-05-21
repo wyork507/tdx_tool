@@ -1,16 +1,16 @@
 # Dependency imports
-from datetime import datetime
 from functools import cached_property
 from logging import Logger
-from typing import Literal, TypeAlias, TypeVar
+from typing import Literal, TypeAlias
 import msgspec, requests
 import pandas as pd
 import geopandas as gpd
 # Local imports
 from .bus_parsers import _bus_parsers
-from .core import tdx_tool
-from .utils import BusRegion
 from .bus_models import RouteStops, Route, RouteShape, Station, Operator, Alert, Schedule, DailySchedule
+from .core import tdx_tool
+from .common_models import Datas
+from .utils import BusRegion
 
 RefreshableCacheProperty: TypeAlias = Literal[
     "routes",
@@ -39,7 +39,7 @@ class tdx_bus(tdx_tool):
     Attributes
     ----------
     auth: tdx_auth
-        an instance of `tdx_auth` for handling authentication
+        an instance of `tdx_auth` for handling authentication, see `tdx_auth` class for details.
     logger: Logger
         a Logger instance for logging
     export_result: bool
@@ -54,33 +54,23 @@ class tdx_bus(tdx_tool):
         whether to fetch data for both regions with ambiguous name
         - `bool` for regions with ambiguous name
         - `None` for non-ambiguous region
-    routes: list[Route] (cached)
+    routes: Datas (cached)
         all bus routes for the region(s)
-    routes_to_dataframe: pd.DataFrame (cached)
-        all bus routes for the region(s), in a tabular format
-    routes_with_shape: list[RouteShape] (cached)
+    routes_with_shape: Datas (cached)
         all bus routes with shape information for the region(s)
-    routes_with_shape_to_dataframe: gpd.GeoDataFrame (cached)
-        all bus routes with shape information for the region(s), in a tabular format with geometry, joined with `routes_to_dataframe` for more details
     stations: list[Station] (cached)
         all bus stations for the region(s)
     stations_to_dataframe: gpd.GeoDataFrame (cached)
         all bus stations for the region(s), in a tabular format with geometry
-    operators: list[Operator] (cached)
+    operators: Dataframe (cached)
         all bus operators for the region(s)
-    operators_to_dataframe: pd.DataFrame (cached)
-        all bus operators for the region(s), in a tabular format
-    schedules: list[Schedule] (cached)
+    schedules: Datas (cached)
         all bus schedules for the region(s)
-    schedules_to_dataframe: pd.DataFrame (cached)
-        all bus schedules for the region(s), in a tabular format
-    daily_timetables: list[DailySchedule] (cached)
+    daily_timetables: Datas (cached)
         all bus daily timetables for the region(s)
-    daily_timetables_to_dataframe: pd.DataFrame (cached)
-        all bus daily timetables for the region(s), in a tabular format
-    alert: list[Alert] (cached)
+    alert: list[Alert] (immediately fetched, not cached)
         current alerts and warnings for bus services in the region(s)
-    operate_status: list[Alert] (cached)
+    operate_status: list[Alert] (immediately fetched, not cached)
         Same as `alert` above
     
     Methods
@@ -93,6 +83,12 @@ class tdx_bus(tdx_tool):
         see `fetch_estimated_arrival_for_routes` method for details.
     fetch_estimated_arrival_for_stations(station_uid: str) -> pd.DataFrame
         see `fetch_estimated_arrival_for_stations` method for details.
+    
+    See Also
+    --------
+    - `tdx_auth`: for handling authentication with the TDx API.
+    - `BusRegion`: for available bus regions and their details.
+    - `Datas`: for understanding the data structure returned by the properties.    
     
     Examples
     --------
@@ -176,6 +172,11 @@ class tdx_bus(tdx_tool):
 
     @property
     def together(self) -> bool | None:
+        """
+        whether to fetch data for both regions with ambiguous name
+        - `bool` for regions with ambiguous name
+        - `None` for non-ambiguous region
+        """
         return self._together
     
     @together.setter
@@ -184,6 +185,7 @@ class tdx_bus(tdx_tool):
     
     @property
     def region(self) -> BusRegion:
+        """where this instance fetches data for"""
         return self.__region
     
     def _url_middle_part(self) -> list[str]:
@@ -213,64 +215,73 @@ class tdx_bus(tdx_tool):
         )
     
     @cached_property
-    def routes(self) -> list[Route]:
+    def routes(self) -> Datas:
+        """all bus route for the specified region(s)"""
+        from .bus_models import Route
+
         def decoder(response: requests.Response) -> list[Route]:
             return msgspec.json.decode(response.content, type=list[Route])
         
-        return self._fetch_combined_data(
-            prefix="v2/Bus/Route",
-            params={
-                "$select": "RouteUID,Operators,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
+        def to_datafram(data: list[Route]) -> pd.DataFrame:
+            return self._parsers.parse_routes(
+                data
+            ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
+        
+        return Datas(
+            data = self._fetch_combined_data(
+                prefix="v2/Bus/Route",
+                params={
+                    "$select": "RouteUID,Operators,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
+                },
+                decoder=decoder),
+            datatype = Route,
+            parsers = {
+                pd.DataFrame: to_datafram
             },
-            decoder=decoder
+            description = f"All bus routes for region(s) {', '.join(self._url_middle_part())}."
         )
     
     @cached_property
-    def routes_to_dataframe(self) -> pd.DataFrame:
-        """
-        Fetch bus routes for the specified region, then cache it.
-        You can refresh the cache by `refresh_cache("routes")`.
-        """
-        return self._parsers.parse_routes(
-            self.routes
-        ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
-    
-    @cached_property
-    def routes_with_shape(self) -> list[RouteShape]:
+    def routes_with_shape(self) -> Datas:
+        """all bus route with shape information for the specified region(s)"""
+        from .bus_models import RouteShape
+
         def decoder(response: requests.Response) -> list[RouteShape]:
             return msgspec.json.decode(response.content, type=list[RouteShape])
-        # Main logic
-        return self._fetch_combined_data(
-            prefix="v2/Bus/Shape",
-            params={
-                "$select": "RouteUID,SubRouteUID,RouteName,Direction,Geometry,EncodedPolyline,UpdateTime"
-            },
-            decoder=decoder
-        )
+        
+        def to_datafram(data: list[RouteShape]) -> pd.DataFrame:
+            return self._parsers.parse_route_with_shape(
+                data
+            ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
+        
+        def to_geodatafram(data: list[RouteShape]) -> gpd.GeoDataFrame:
+            new_data = to_datafram(data).join(
+                self.routes.to_dataframe.set_index(["RouteUID", "SubRouteUID"]),
+                on=["RouteUID", "SubRouteUID"],
+                how="left",
+                rsuffix="_route"
+            )
+            return gpd.GeoDataFrame(new_data, geometry="geometry", crs=self.default_coor)
 
-    @cached_property
-    def routes_with_shape_to_dataframe(self) -> gpd.GeoDataFrame:
-        """
-        Fetch bus routes with shape information for the specified region, then cache it.
-        You can refresh the cache by `refresh_cache("routes_with_shape")`.
-        """
-        data = self._parsers.parse_route_with_shape(
-            self.routes_with_shape
-        ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
-        data = data.join(
-            self.routes_to_dataframe.set_index(["RouteUID", "SubRouteUID"]),
-            on=["RouteUID", "SubRouteUID"],
-            how="left",
-            rsuffix="_route"
+        return Datas(
+            data = self._fetch_combined_data(
+                prefix="v2/Bus/Shape",
+                params={
+                    "$select": "RouteUID,SubRouteUID,RouteName,Direction,Geometry,EncodedPolyline,UpdateTime"
+                },
+                decoder=decoder
+            ),
+            datatype = RouteShape,
+            parsers = {
+                pd.DataFrame: to_geodatafram,
+                gpd.GeoDataFrame: to_geodatafram
+            },
+            description = f"All bus routes with shape information for region(s) {', '.join(self._url_middle_part())}."
         )
-        return gpd.GeoDataFrame(data, geometry="geometry", crs=self.default_coor)
 
     @cached_property
     def stations(self) -> list[Station]:
-        """
-        Fetch bus stations for the specified region.
-        You can refresh the cache by `refresh_cache("stations")`.
-        """
+        """all bus stations for the specified region(s)"""
         from .bus_models import StationFraction
         def decoder(response: requests.Response) -> list[StationFraction]:
             return msgspec.json.decode(response.content, type=list[StationFraction])
@@ -288,6 +299,7 @@ class tdx_bus(tdx_tool):
     
     @cached_property
     def stations_to_dataframe(self) -> pd.DataFrame:
+        """all bus stations for the specified region(s), in a tabular format with geometry"""
         data = self._parsers.parse_stations_to_dataframe(self._route_stops)
         data = data.sort_values(by=["StationID", "SubRouteNameEn", "Sequence"]).reset_index(drop=True)
         coor = data[["PositionLon", "PositionLat"]]
@@ -300,10 +312,7 @@ class tdx_bus(tdx_tool):
     
     @cached_property
     def operators(self) -> pd.DataFrame:
-        """
-        Fetch bus operators for the specified region.
-        You can refresh the cache by `refresh_cache("operators")`.
-        """
+        """all bus operators for the specified region(s)"""
         def decoder(response: requests.Response) -> list[Operator]:
             return msgspec.json.decode(response.content, type=list[Operator])
         
@@ -317,60 +326,57 @@ class tdx_bus(tdx_tool):
         )
     
     @cached_property
-    def schedules(self) -> list[Schedule]:
-        """
-        Fetch bus stations timetable for the specified region.
-        You can refresh the cache by `refresh_cache("stations_timetable")`.
-        """
+    def schedules(self) -> Datas:
+        """the common operating schedules for all bus routes in the specified region(s)"""
         def decoder(response: requests.Response) -> list[Schedule]:
             return msgspec.json.decode(response.content, type=list[Schedule])
+        
+        def to_dataframe(data: list[Schedule]) -> pd.DataFrame:
+            return self._parsers.parse_schedules(
+                data
+            ).sort_values(by=["RouteUID", "SubRouteUID", "Direction", "OperatorID"]).reset_index(drop=True)
 
-        return self._fetch_combined_data(
-            prefix="v2/Bus/Schedule",
-            params={
-                "$select": "RouteUID,SubRouteUID,Direction,OperatorID,Timetables,Frequencys,UpdateTime"
+        return Datas(
+            data = self._fetch_combined_data(
+                prefix="v2/Bus/Schedule",
+                params={
+                    "$select": "RouteUID,SubRouteUID,Direction,OperatorID,Timetables,Frequencys,UpdateTime"
+                },
+                decoder=decoder),
+            datatype = Schedule,
+            parsers = {
+                pd.DataFrame: to_dataframe
             },
-            decoder=decoder
         )
-    
-    @cached_property
-    def schedules_to_dataframe(self) -> pd.DataFrame:
-        """
-        Fetch bus stations timetable for the specified region, then cache it.
-        You can refresh the cache by `refresh_cache("stations_timetable")`.
-        """
-        return self._parsers.parse_schedules(
-            self.schedules
-        ).sort_values(by=["RouteUID", "SubRouteUID", "Direction", "OperatorID"]).reset_index(drop=True)
             
     @cached_property
-    def daily_timetables(self) -> list[DailySchedule]:
-        """
-        """
+    def daily_timetables(self) -> Datas:
+        """daily timetables for all bus routes for recently dates in the specified region(s)"""
         def decoder(response: requests.Response) -> list[DailySchedule]:
             return msgspec.json.decode(response.content, type=list[DailySchedule])
+        
+        def to_dataframe(data: list[DailySchedule]) -> pd.DataFrame:
+            return self._parsers.parse_schedules(
+                data
+            ).sort_values(by=["RouteUID", "SubRouteUID", "Direction"]).reset_index(drop=True)
 
-        return self._fetch_combined_data(
-            prefix="v2/Bus/DailyTimeTable",
-            params={
-                "$select": "BusDate,RouteUID,SubRouteUID,Direction,OperatorID,Timetables,UpdateTime"
-            },
-            decoder=decoder
+        return Datas(
+            data = self._fetch_combined_data(
+                prefix="v2/Bus/DailyTimeTable",
+                params={
+                    "$select": "BusDate,RouteUID,SubRouteUID,Direction,OperatorID,Timetables,UpdateTime"
+                },
+                decoder=decoder
+            ),
+            datatype = DailySchedule,
+            parsers = {
+                pd.DataFrame: to_dataframe
+            }
         )
-    
-    @cached_property
-    def daily_timetables_to_dataframe(self) -> pd.DataFrame:
-        return self._parsers.parse_schedules(
-            self.daily_timetables
-        )
-
 
     @property
     def alert(self) -> list[Alert]:
-        """
-        Same as operate_status, because TDx name it "Alert" but the content is more like "OperateStatus".
-        We keep both names for better user experience.
-        """
+        """Same as operate_status, because TDx name it "Alert" but the content is more like "OperateStatus". We keep both names for better user experience."""
         def decoder(response: requests.Response) -> list[Alert]: # type: ignore
             return msgspec.json.decode(response.content, type=list[Alert])
         
@@ -384,10 +390,7 @@ class tdx_bus(tdx_tool):
 
     @property
     def operate_status(self) -> list[Alert]:
-        """
-        Fetch current alerts and warnings for bus services in the specified region.
-        This may include weather-related disruptions, traffic incidents affecting bus routes, and other urgent notifications.
-        """
+        """such as weather-related disruptions, traffic incidents affecting bus routes, and other urgent notifications."""
         return self.alert
     
     def refresh_cache(
@@ -397,9 +400,26 @@ class tdx_bus(tdx_tool):
         """
         Manually refresh the cached data for a specific property.
         This is useful if you want to ensure you have the most up-to-date information without waiting for the cache to expire.
+
+        Parameters
+        ----------
+        property_name: RefreshableCacheProperty | Literal["all"], default="all"
+            The name of the property to refresh. Valid options are:
+            - `routes`: Refresh the cache for bus routes.
+            - `stations`: Refresh the cache for bus stations.
+            - `routes_with_shape`: Refresh the cache for bus routes with shape information.
+            - `operators`: Refresh the cache for bus operators.
+            - `schedules`: Refresh the cache for bus schedules.
+            - `daily_timetables`: Refresh the cache for daily timetables.
+            - `all`: Refresh the cache for all properties.
+        
+        Notes
+        -----
+        If the key for the specified property does not exist in the cache, it will simply
+        be ignored and output a warning message into the logger.
         """
         refreshable_properties = {"routes", "stations", "routes_with_shape", "operators", "schedules", "daily_timetables"}
-        refresh_targets: set[str]
+        refresh_targets: set[str] = set()
         
         match property_name:
             case "all":
@@ -408,7 +428,7 @@ class tdx_bus(tdx_tool):
                 refresh_targets = {property_name}
             case _:
                 self.logger.warning(f"Invalid property name for cache refresh: {property_name}. Valid options are:\n\t {', '.join(refreshable_properties)}")
-                raise
+                return
         
         if refresh_targets & {"stations", "routes_with_shape"}:
             self.__dict__.pop("_route_stops", None)  # Clear the cached route stops if stations or routes_with_shape is being refreshed

@@ -15,6 +15,44 @@ from .bike_models import Station, Availability
 from .detail_data_taipei import taipei_open_data
 
 class tdx_bike(tdx_tool):
+    """
+    A class for fetching and processing bike-sharing data from the TDX API. This class provides methods to
+    access bike station information, availability, and other related data for specified regions. It also
+    includes functionality to refresh cached data and handle region-specific data fetching.
+    
+    Parameters
+    ----------
+    client_id: str
+        TDX API Client ID (required)
+    client_key: str
+        TDX API Client Key (required)
+    region: BikeRegion
+        The region for which to fetch bike data. Must be specified as a `BikeRegion` enum value.
+    logger: Logger, optional
+        Logger instance for logging. If not provided, a default logger that does not output anywhere will be used.
+    
+    Attributes
+    ----------
+    auth: tdx_auth
+        an instance of `tdx_auth` for handling authentication, see `tdx_auth` class for details.
+    logger: Logger
+        a Logger instance for logging
+    export_result: bool
+        whether to export results
+    default_coor: str, default="EPSG:4326"
+        specifies the default coordinate reference system for geospatial data (default is WGS 84)
+    output_path: str, default="output"
+        the directory path where output files will be saved (default is "output")
+    regions: BikeRegion (read-only)
+        where the bike data is fetched for
+    stations: gpd.GeoDataFrame (cached)
+        bike station information, such as name, location, capacity, etc.
+    
+    Methods
+    -------
+    fetch_availability() -> pd.DataFrame
+        Fetch bike availability data for the specified region.
+    """
     def __new__(
         cls,
         client_id: str,
@@ -39,6 +77,12 @@ class tdx_bike(tdx_tool):
         regions: list[BikeRegion] | None = None,
         logger: Logger | None = None
     ):
+        """
+        Raises
+        ------
+        ValueError
+            If regions is not specified for `tdx_bike` enums.
+        """
         super().__init__(client_id=client_id, client_key=client_key, logger=logger)
         if regions is None:
             raise ValueError("Regions must be specified for `tdx_bike` enums.")
@@ -128,9 +172,35 @@ class tdx_bike(tdx_tool):
 
 class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
     """
-    This class extends `tdx_bike`, specifically for Taipei City.
-    Since Taipei City has more detailed bike data (e.g. OD data),
-    we can create a subclass for it to provide more specific methods and properties.
+    This class extends `tdx_bike`, specifically for Taipei City. Since Taipei City has
+    more detailed bike data (e.g. OD data), you can create a instance for this by just
+    specifying the region as Taipei when creating an instance of `tdx_bike`.
+    >>> bike = tdx_bike(client_id, client_key, BikeRegion.Taipei)
+
+    Attributes
+    ----------
+    od_data_detail: pd.DataFrame (cached)
+        The available OD data list for Taipei City. Field includes:
+    od_data_list: dict[str, str] (cached)
+        A dict mapping the month to related file URL.
+    
+    Methods
+    -------
+    download_od_datas(months: list[str], overwrite: bool = False) -> list[Path]
+        Download the OD data file for a specific month. The file will be downloaded and extracted to `output_path`.
+    load_od_data(month: str, specify_folder: str | None = None, specify_filename: str | None = None) -> pd.DataFrame
+        Load the OD data from a default or specified path.
+    load_od_datas(months: list[str], specify_folder: str | None = None) -> pd.DataFrame
+        Load multiple OD data files for the specified months.
+    
+    Notes
+    -----
+    - Do NOT directly create an instance of this class, use `tdx_bike` with Taipei region instead.
+    - Keep the internet connection when using the download methods, and make sure you have enough storage space.
+    
+    See Also
+    --------
+    - `tdx_bike`: The parent class for fetching bike data from TDX API, which can be used for multiple regions.
     """
     def __init__(
         self,
@@ -155,7 +225,11 @@ class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
         - FileURL: The URL to download the data file.
         - UpdateTime: The time when the data was last updated.
         - SourceUpdateTime: The time when the data was last updated by the source.
-        Return a `pd.DataFrame` 
+        
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing the details of available OD data for Taipei City. 
         """
         def decoder(response: requests.Response) -> pd.DataFrame:
             return pd.DataFrame(
@@ -190,6 +264,11 @@ class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
     def od_data_list(self) -> dict[str, str]:
         """
         Return a dict mapping the month to related file URL.
+        
+        Returns
+        -------
+        dict[str, str]
+            A dictionary mapping each month to its corresponding file URL.
         """
         return dict(
             zip(
@@ -201,15 +280,27 @@ class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
     def download_od_datas(self, months: list[str], overwrite: bool = False) -> list[Path]:
         """
         Download the OD data file for a specific month. The file will be downloaded and extracted to `output_path`.
-        Parameters:
-            months: A list of months for which to download data (format: YYYY/M).
-            overwrite: Whether to overwrite the file if it already exists. Default is False.
-        Returns:
-            list[Path]: A list of folder paths where the files are downloaded.
-        Raises:
-            ValueError: If the specified month is not found in the OD data list.
-            FileExistsError: If the file already exists and overwrite is set to False.
-            HttpError: If there is an HTTP error during the download process.
+        
+        Parameters
+        ----------
+        months: list[str]
+            A list of months for which to download data (format: YYYY/M).
+        overwrite: bool, default=False
+            Whether to overwrite the file if it already exists. Default is False.
+        
+        Returns
+        -------
+        list[Path]
+            A list of folder paths where the files are downloaded.
+        
+        Raises
+        --------
+        ValueError
+            If the specified month is not found in the OD data list.
+        FileExistsError
+            If the file already exists and overwrite is set to False.
+        HttpError
+            If there is an HTTP error during the download process.
         """
         if not all(month in self.od_data_list.keys() for month in months):
             self.logger.error(f"One or more specified months are not found in the OD data list: {months}. Available months: {list(self.od_data_list.keys())}")
@@ -233,12 +324,19 @@ class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
     def load_od_data(self, month: str, specify_folder: str | None = None, specify_filename: str | None = None) -> pd.DataFrame:
         """
         Load the OD data from a default or specified path.
-        Parameters:
-            month: The month of the data to load (format: YYYYMM).
-            specify_folder: The folder containing the CSV file with the OD data. If None, the default folder will be used.
-            specify_filename: The name of the CSV file to load. If None, the default filename will be used (assumed to be the same as the downloaded file).
-        Returns:
-            pd.DataFrame: The loaded OD data.
+        
+        Parameters
+        ----------
+        month: str
+            The month of the data to load (format: YYYYMM).
+        specify_folder: str | None, default=None
+            The folder containing the CSV file with the OD data. If None, the default folder will be used.
+        specify_filename: str | None, default=None
+            The name of the CSV file to load. If None, the default filename will be used (assumed to be the same as the downloaded file).
+        Returns
+        -------
+        pd.DataFrame
+            The loaded OD data.
         """
         # Confirm the month is valid
         if month not in self.od_data_list.keys():
@@ -271,9 +369,16 @@ class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
     def load_od_datas(self, months: list[str], specify_folder: str | None = None) -> pd.DataFrame:
         """
         Load multiple OD data files for the specified months.
-        Parameters:
-            months: A list of months for which to load data (format: YYYYMM).
-            specify_folder: The folder containing the CSV files with the OD data. If None, the default folder will be used.
+        Parameters
+        ----------
+        months: list[str]
+            A list of months for which to load data (format: YYYYMM).
+        specify_folder: str | None, default=None
+            The folder containing the CSV files with the OD data. If None, the default folder will be used.
+        Returns
+        -------
+        pd.DataFrame
+            The loaded OD data.
         """
 
 

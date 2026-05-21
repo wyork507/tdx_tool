@@ -6,22 +6,23 @@ dependencies:
   - python=3.11
   - pip>=26
   # Core dependencies
-  - requests>=2.31
-  - pandas>=2.2
-  - geopandas>=0.14
-  - pyarrow>=15
-  - msgspec>=0.18
-  - shapely>=2.0
-  - pyproj>=3.6
+  - requests>=2.33
+  - pandas>=3.0
+  - geopandas>=1.1
+  - pyarrow>=24.0
+  - msgspec>=0.21
+  - shapely>=2.1
+  - pyproj>=3.7
+  - xarray>=2026.4
   # Development tools
-  - pytest>=8
-  - pytest-mock>=3.14
-  - ruff>=0.6
-  - mypy>=1.11
+  - pytest>=9.0
+  - pytest-mock>=3.15
+  - ruff>=0.15
+  - mypy>=1.20
   # Jupyter notebook support (optional but useful)
-  - jupyter>=1.0
-  - ipython>=8.0
-  - jupyterlab>=4.0
+  - jupyter>=1.1
+  - ipython>=9.13
+  - jupyterlab>=4.5
   # Build tools
   - setuptools>=69
   - wheel
