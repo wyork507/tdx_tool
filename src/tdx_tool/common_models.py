@@ -1,11 +1,18 @@
 from dataclasses import dataclass
-from _typeshed import DataclassInstance
 from functools import cached_property
-from typing import Optional, Callable, Dict, Type, Union, cast, TypeVar, List, overload
+from typing import (
+    Optional, Callable, Dict, Type, Protocol, Any,
+    Union, cast, TypeVar, List, overload, ClassVar
+)
 from pandas import DataFrame
 from geopandas import GeoDataFrame
 from xarray import DataArray
 from msgspec import Struct
+
+class DataclassInstance(Protocol):
+    __dataclass_fields__: ClassVar[Dict[str, Any]]
+
+DataType = TypeVar("DataType", bound=Union[DataclassInstance, Struct])
 
 @dataclass(frozen=True)
 class I18n:
@@ -67,7 +74,6 @@ class Datas:
         xarray DataArray converted from the data list, suitable for multi-dimensional data
     """
     OutputType = Union[DataFrame, GeoDataFrame, DataArray]
-    DataType = TypeVar("DataType", bound=Union[Struct, DataclassInstance])
     ParsersType = Callable[[list[DataType]], OutputType]
     def __init__(self,
         data: List[DataType],

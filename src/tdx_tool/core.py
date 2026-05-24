@@ -55,6 +55,10 @@ class tdx_tool:
         self.__export_result = False
         self.__default_coor = "EPSG:4326" # WGS 84 - World Geodetic System 1984
         self.__output_path = "output"
+    
+    @classmethod
+    def from_auth(cls, auth: tdx_auth, *args, **kwargs) -> "tdx_tool":
+        return cls(client_id=auth.client_id, client_key=auth.client_key, logger=auth.logger)
 
     @property
     def auth_header(self) -> dict:

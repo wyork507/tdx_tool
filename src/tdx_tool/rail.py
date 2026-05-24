@@ -6,8 +6,10 @@ from typing import Literal
 import msgspec, requests
 import pandas as pd
 import geopandas as gpd
+
+from tdx_tool.authority import tdx_auth
 # Local imports
-from .parsers import _bike_parsers
+from .rail_parsers import _rail_parsers
 from .core import tdx_tool
 from .utils import RailwayOperator
 from .rail_models import *
@@ -56,4 +58,8 @@ class tdx_rail(tdx_tool):
             print(f"\t\t{', '.join(operator for operator, _ in record)}")
         return cls(
             client_id, client_key, [RailwayOperator(identity) for identity in identities if identity is not None], logger=logger
-    )
+        )
+
+    @classmethod
+    def from_auth(cls, auth: tdx_auth, logger: Logger | None = None, operators: list[RailwayOperator] | None = None) -> "tdx_rail":
+        return cls(client_id=auth.client_id, client_key=auth.client_key, operators=operators, logger=logger or auth.logger)

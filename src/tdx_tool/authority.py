@@ -10,11 +10,14 @@ class _tdx_auth_meta(type):
     _instances = {}
     _lock = Lock()
     def __call__(cls, *args, **kwargs):
+        client_id = kwargs.get("client_id") or (args[0] if len(args) > 0 else None)
+        key = (cls, client_id)
+
         with cls._lock:
-            if cls not in cls._instances:
+            if key not in cls._instances:
                 instance = super().__call__(*args, **kwargs)
-                cls._instances[cls] = instance
-            return cls._instances[cls]
+                cls._instances[key] = instance
+            return cls._instances[key]
 
 class tdx_auth(metaclass=_tdx_auth_meta):
     """

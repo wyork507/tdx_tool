@@ -1,13 +1,15 @@
 # Dependency imports
+from collections.abc import Sequence
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from logging import Logger
-from typing import Literal
+from typing import Literal, overload
 import msgspec, requests
 import pandas as pd
 import geopandas as gpd
 # Local imports
+from .authority import tdx_auth
 from .bike_parsers import _bike_parsers
 from .core import tdx_tool
 from .utils import BikeRegion
@@ -53,13 +55,28 @@ class tdx_bike(tdx_tool):
     fetch_availability() -> pd.DataFrame
         Fetch bike availability data for the specified region.
     """
-    def __new__(
-        cls,
+    @overload
+    def __new__(cls,
         client_id: str,
         client_key: str,
-        regions: list[BikeRegion] | None = None,
+        regions: Sequence[Literal[BikeRegion.Taipei]],
+        logger: Logger | None = None
+    ) -> "tdx_bike_taipei_city": ...
+    
+    @overload
+    def __new__(cls,
+        client_id: str,
+        client_key: str,
+        regions: Sequence[BikeRegion] | None = None,
+        logger: Logger | None = None
+    ) -> "tdx_bike": ...
+
+    def __new__(cls,
+        client_id: str,
+        client_key: str,
+        regions: Sequence[BikeRegion] | None = None,
         logger: Logger | None = None,
-    ):
+    ) -> "tdx_bike | tdx_bike_taipei_city":
         if cls is tdx_bike:
             match regions:
                 case [BikeRegion.Taipei]:
@@ -74,10 +91,21 @@ class tdx_bike(tdx_tool):
     def __init__(self,
         client_id: str,
         client_key: str,
-        regions: list[BikeRegion] | None = None,
+        regions: Sequence[BikeRegion] | None = None,
         logger: Logger | None = None
     ):
         """
+        Parameters
+        ----------
+        client_id: str
+            TDX API Client ID (required)
+        client_key: str
+            TDX API Client Key (required)
+        regions: Sequence[BikeRegion]
+            The regions for which to fetch bike data. Must be specified as a `BikeRegion` enum value.
+        logger: Logger, optional
+            Logger instance for logging. If not provided, a default logger that does not output anywhere will be used.
+
         Raises
         ------
         ValueError
@@ -100,12 +128,19 @@ class tdx_bike(tdx_tool):
     ) -> "tdx_bike":
         """
         Factory method to create an instance of `tdx_bike` based on a region string.
-        Args:
-            client_id: TDX API client ID.
-            client_key: TDX API client key.
-            region: The name of the region to fetch bike data for. Must match one of the names in `BikeRegion`.
-            skip_invalid: Whether to skip invalid region names.
-            logger: Optional logger for debugging and information messages.
+        
+        Parameters
+        ----------
+        client_id: str
+            TDX API client ID.
+        client_key: str
+            TDX API client key.
+        regions: list[str]
+            The names of the regions to fetch bike data for. Must match one of the names in `BikeRegion`.
+        skip_invalid: bool, default=False
+            Whether to skip invalid region names.
+        logger: Logger, optional
+            Logger for debugging and information messages.
         """
         from .utils import strings_into_identities as convertor
         identities = []
@@ -124,8 +159,25 @@ class tdx_bike(tdx_tool):
             client_id, client_key, [BikeRegion(identity) for identity in identities if identity is not None], logger=logger
         )
     
+    @classmethod
+    def from_auth(cls,
+        auth: tdx_auth,
+        regions: list[BikeRegion]
+    ) -> "tdx_bike":
+        """
+        Factory method to create an instance of `tdx_bike` based on a `tdx_auth` instance and specified regions.
+        
+        Parameters
+        ----------
+        auth: tdx_auth
+            An instance of `tdx_auth` containing authentication information.
+        regions: BikeRegion 
+        A list of `BikeRegion` enums specifying the regions to fetch bike data for.
+        """
+        return cls(auth.client_id, auth.client_key, regions, logger=auth.logger)
+    
     @property
-    def regions(self) -> list[BikeRegion]:
+    def regions(self) -> Sequence[BikeRegion]:
         return self.__regions
 
     def _url_middle_part(self) -> list[str]:
@@ -141,7 +193,7 @@ class tdx_bike(tdx_tool):
         data = self._fetch_combined_data(
             prefix="v2/Bike/Station",
             params={
-                "$select": "StationUID,StationName,StationPosition,StationAddress,StopDescription,BikesCapacity,ServiceType,UpdateTime",
+                "$select": ','.join(Station.__struct_fields__),
             },
             decoder=decoder,
             parser=self._parsers.parse_stations
@@ -164,7 +216,7 @@ class tdx_bike(tdx_tool):
         return self._fetch_combined_data(
             prefix="v2/Bike/Availability",
             params={
-                "$select": "StationUID,ServiceStatus,AvailableRentBikes,AvailableReturnBikes,UpdateTime,AvailableRentBikesDetail",
+                "$select": ','.join(Availability.__struct_fields__),
             },
             decoder=decoder,
             parser=self._parsers.parse_availability
@@ -380,6 +432,6 @@ class tdx_bike_taipei_city(tdx_bike, taipei_open_data):
         pd.DataFrame
             The loaded OD data.
         """
-
+        pass
 
     

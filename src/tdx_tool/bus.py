@@ -5,9 +5,11 @@ from typing import Literal, TypeAlias
 import msgspec, requests
 import pandas as pd
 import geopandas as gpd
+
+from tdx_tool.authority import tdx_auth
 # Local imports
 from .bus_parsers import _bus_parsers
-from .bus_models import RouteStops, Route, RouteShape, Station, Operator, Alert, Schedule, DailySchedule
+from .bus_models import RouteStops, Station, Operator, Alert, Schedule, DailySchedule
 from .core import tdx_tool
 from .common_models import Datas
 from .utils import BusRegion
@@ -162,13 +164,49 @@ class tdx_bus(tdx_tool):
         client_key: str,
         logger: Logger | None = None
     ) -> "tdx_bus":
-        """ 
+        """
+        Initialize the class for intercity bus data.
+
+        Parameters
+        ----------
+        client_id: str
+            TDX API Client ID (required)
+        client_key: str
+            TDX API Client Key (required)
+        logger: Logger, optional
+            Logger instance for logging. If not provided, a default logger that does not output anywhere will be used.
+
         Returns
         -------
         tdx_bus
             An instance of `tdx_bus` initialized for intercity bus data.
         """
         return cls(client_id=client_id, client_key=client_key, logger=logger)
+    
+    @classmethod
+    def from_auth(cls,
+        auth: tdx_auth,
+        region: BusRegion,
+        together: bool = False
+    ) -> "tdx_bus":
+        """
+        Initialize the class with authentication information and a specific region.
+
+        Parameters
+        ----------
+        auth: tdx_auth
+            Authentication instance containing client ID and key.
+        region: BusRegion
+            The region for which to fetch data.
+        together: bool, optional
+            Whether to fetch data for both regions with ambiguous names. Default is False.
+
+        Returns
+        -------
+        tdx_bus
+            An instance of `tdx_bus` initialized with the provided authentication and region.
+        """
+        return cls(auth.client_id, auth.client_key, region, together, auth.logger)
 
     @property
     def together(self) -> bool | None:
@@ -203,15 +241,15 @@ class tdx_bus(tdx_tool):
 
     @cached_property
     def _route_stops(self) -> list[RouteStops]:
-        def decode(response: requests.Response) -> list[RouteStops]:
+        def decoder(response: requests.Response) -> list[RouteStops]:
             return msgspec.json.decode(response.content, type=list[RouteStops])
-        
+
         return self._fetch_combined_data(
             prefix="v2/Bus/StopOfRoute",
             params={
-                "$select": "RouteUID,SubRouteUID,RouteName,SubRouteName,Stops,Operators,Direction,City,CityCode,UpdateTime"
+                "$select": ','.join(RouteStops.__struct_fields__)
             },
-            decoder=decode
+            decoder=decoder
         )
     
     @cached_property
@@ -231,7 +269,7 @@ class tdx_bus(tdx_tool):
             data = self._fetch_combined_data(
                 prefix="v2/Bus/Route",
                 params={
-                    "$select": "RouteUID,Operators,BusRouteType,RouteName,DepartureStopNameZh,DepartureStopNameEn,DestinationStopNameZh,DestinationStopNameEn,UpdateTime,VersionID,SubRoutes"
+                    "$select": ','.join(Route.__struct_fields__)
                 },
                 decoder=decoder),
             datatype = Route,
@@ -267,7 +305,7 @@ class tdx_bus(tdx_tool):
             data = self._fetch_combined_data(
                 prefix="v2/Bus/Shape",
                 params={
-                    "$select": "RouteUID,SubRouteUID,RouteName,Direction,Geometry,EncodedPolyline,UpdateTime"
+                    "$select": ','.join(RouteShape.__struct_fields__)
                 },
                 decoder=decoder
             ),
@@ -291,7 +329,7 @@ class tdx_bus(tdx_tool):
             self._fetch_combined_data(
                 prefix="v2/Bus/Station",
                 params={
-                    "$select": "StationUID,StationPosition,StationAddress,LocationCityCode,Bearing,UpdateTime"
+                    "$select": ','.join(StationFraction.__struct_fields__)
                 },
                 decoder=decoder
             )
@@ -319,7 +357,7 @@ class tdx_bus(tdx_tool):
         return self._fetch_combined_data(
             prefix="v2/Bus/Operator",
             params={
-                "$select": "OperatorID,OperatorName"
+                "$select": ','.join(Operator.__struct_fields__)
             },
             decoder=decoder,
             parser=self._parsers.parse_operators
@@ -340,7 +378,7 @@ class tdx_bus(tdx_tool):
             data = self._fetch_combined_data(
                 prefix="v2/Bus/Schedule",
                 params={
-                    "$select": "RouteUID,SubRouteUID,Direction,OperatorID,Timetables,Frequencys,UpdateTime"
+                    "$select": ','.join(Schedule.__struct_fields__)
                 },
                 decoder=decoder),
             datatype = Schedule,
@@ -364,7 +402,7 @@ class tdx_bus(tdx_tool):
             data = self._fetch_combined_data(
                 prefix="v2/Bus/DailyTimeTable",
                 params={
-                    "$select": "BusDate,RouteUID,SubRouteUID,Direction,OperatorID,Timetables,UpdateTime"
+                    "$select": ','.join(DailySchedule.__struct_fields__)
                 },
                 decoder=decoder
             ),
@@ -383,7 +421,7 @@ class tdx_bus(tdx_tool):
         return self._fetch_combined_data(
             prefix="v2/Bus/Alert",
             params={
-                "$select": "AlertID,Title,Description,Department,Status,Cause,Effect,Scope,PublishTime,StartTime,EndTime,SrcUpdateTime,UpdateTime"
+                "$select": ','.join(Alert.__struct_fields__)
             },
             decoder=decoder
         )

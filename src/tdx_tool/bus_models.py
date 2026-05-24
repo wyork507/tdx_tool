@@ -168,7 +168,7 @@ class RouteStops(ms.Struct, kw_only=True):
 
 class RouteShape(ms.Struct, kw_only=True):
     RouteUID: str
-    SubRouteUID: str
+    SubRouteUID: Optional[str] = None
     RouteName: I18n
     Direction: int
     EncodedPolyline: str
