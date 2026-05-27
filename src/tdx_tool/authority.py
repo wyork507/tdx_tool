@@ -1,5 +1,6 @@
 # Dependencies
 from logging import Logger
+from typing import Any
 from requests import post
 from datetime import datetime
 from threading import Lock
@@ -21,7 +22,8 @@ class _tdx_auth_meta(type):
 
 class tdx_auth(metaclass=_tdx_auth_meta):
     """
-    A class that manages TDX API authentication tokens with automatic refresh and caching.
+    A class that manages TDX API authentication tokens with automatic refresh and caching. If you create multiple
+    instances of tdx_auth with the same client_id, they will share the same token cache and refresh logic.
     
     Parameters
     ----------
@@ -67,6 +69,8 @@ class tdx_auth(metaclass=_tdx_auth_meta):
     >>> token = auth.token # 1. Get token via property 
     >>> token = auth()     # 2. Alternative way to get token
     """
+    __slots__ = ("client_id", "client_key", "logger", "_token", "_expire_time", "_token_lock")
+
     def __init__(
         self,
         client_id: str,
@@ -183,6 +187,12 @@ class tdx_auth(metaclass=_tdx_auth_meta):
             raise RuntimeError("TDXAuth token is not available.")
         return self._token
     
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("tdx_auth attributes are read-only.")
+    
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("tdx_auth attributes cannot be deleted.")
+
     def __call__(self) -> str:
         return self.token
     

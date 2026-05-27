@@ -123,7 +123,12 @@ class tdx_bus(tdx_tool):
         self._parsers = _bus_parsers(self.logger)
 
     @classmethod
-    def from_region_str(cls, client_id: str, client_key: str, region: str, logger: Logger | None = None) -> "tdx_bus":
+    def from_region_str(cls,
+        client_id: str,
+        client_key: str,
+        region: str,
+        logger: Logger | None = None
+    ) -> "tdx_bus":
         """
         Enter a name string, such as "Taipei" or "Hsinchu", to initialize the class with the corresponding region.
         If the name is ambiguous (see `BusRegion` enum for details), the default will be the main city with it related
@@ -218,7 +223,7 @@ class tdx_bus(tdx_tool):
         return self._together
     
     @together.setter
-    def together(self, is_on: bool = True):
+    def together(self, is_on: bool = True) -> None:
         self._together = True if self.__region.ambiguous_case is not None and is_on else None
     
     @property
@@ -481,14 +486,14 @@ class tdx_bus(tdx_tool):
         self,
         route_name: str,
         only_departures: bool = False,
-        ) -> pd.DataFrame:
+        ) -> Datas:
         """
         
         """
         pass
 
     # TODO
-    def fetch_estimated_arrival_for_routes(self, route_name: str) -> pd.DataFrame:
+    def fetch_estimated_arrival_for_routes(self, route_name: str) -> Datas:
         """
         Fetch real-time bus information for a specific route.
         This includes estimated arrival times, current bus locations, and occupancy status.
@@ -496,7 +501,7 @@ class tdx_bus(tdx_tool):
         pass
 
     # TODO
-    def fetch_estimated_arrival_for_stations(self, station_uid: str) -> pd.DataFrame:
+    def fetch_estimated_arrival_for_stations(self, station_uid: str) -> Datas:
         """
         Fetch real-time bus information for a specific station.
         This includes estimated arrival times for all routes serving the station, current bus locations, and occupancy status.

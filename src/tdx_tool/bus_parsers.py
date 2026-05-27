@@ -4,7 +4,7 @@ import pandas as pd
 import geopandas as gpd
 import shapely
 # Local imports
-from .common_parsers import _parsers
+from .common_parsers import _parsers, with_tqdm
 from .bus_models import DailySchedule, Route, RouteShape, RouteStops, Alert, Schedule, Operator, StationFraction, Station
 
 
@@ -15,9 +15,10 @@ class _bus_parsers(_parsers):
     def __parse_direction(self, direction: int) -> str | None:
         from .bus_models import Direction
         try: return Direction(direction).name
-        except Exception:
-            return None
+        except Exception: return None
     
+    # MARK: Routes Parsers
+    @with_tqdm(arg_names=["routes"], desc="Parsing routes", unit="route")
     def parse_routes(self, routes: list[Route]) -> pd.DataFrame:
         """
         """
@@ -56,6 +57,7 @@ class _bus_parsers(_parsers):
                 data.append(row)
         return pd.DataFrame(data)
     
+    @with_tqdm(arg_names=["routes"], desc="Parsing routes with shapes", unit="route")
     def parse_route_with_shape(self, routes: list[RouteShape]) -> pd.DataFrame:
         """
         """
@@ -77,6 +79,8 @@ class _bus_parsers(_parsers):
             })
         return pd.DataFrame(data)
     
+    # MARK: Stations Parsers
+    @with_tqdm(arg_names=["route_stops", "station_fractions"], desc="Parsing stations", unit="station")
     def parse_stations(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, Station]:
         """
         """
@@ -108,7 +112,8 @@ class _bus_parsers(_parsers):
                 self.logger.debug(f"Station {station.StationUID} shares geohash {geohash} with station(s) {hash_map[geohash]}")
                 data[station.StationUID].StationUID = list(hash_map[geohash])
         return data
-
+    
+    @with_tqdm(arg_names=["route_stops"], desc="Parsing stations to DataFrame", unit="station")
     def parse_stations_to_dataframe(self, route_stops: list[RouteStops]) -> pd.DataFrame:
         """
         """
@@ -137,6 +142,8 @@ class _bus_parsers(_parsers):
                 })
         return pd.DataFrame(data)
     
+    # MARK: Operators Parsers
+    @with_tqdm(arg_names=["operators"], desc="Parsing operators", unit="operator")
     def parse_operators(self, operators: list[Operator]) -> pd.DataFrame:
         """
         """
@@ -149,6 +156,7 @@ class _bus_parsers(_parsers):
             })
         return pd.DataFrame(data)
     
+    # MARK: Alerts Parsers
     def parse_alerts(self,alerts: list[Alert]) -> pd.DataFrame:
         data = []
         for a in alerts:
@@ -181,6 +189,7 @@ class _bus_parsers(_parsers):
 
         return pd.concat(data, axis=0, ignore_index=True)
     
+    # MARK: Schedules Parsers
     def __flat_route_info(self, schedule: Schedule | DailySchedule) -> dict:
         return {
             "RouteUID": schedule.RouteUID,
