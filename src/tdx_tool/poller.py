@@ -296,7 +296,7 @@ class Poller:
                 together,
                 logger=self.logger
             )
-        return Bus, self._engines[key] # type: ignore[return-value]
+        return self._engines[key] # type: ignore[return-value]
     
     def _add_bike_engine(self, regions: list[BikeRegion]) -> Bike:
         if not all(isinstance(region, BikeRegion) for region in regions):

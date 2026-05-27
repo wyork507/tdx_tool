@@ -77,13 +77,12 @@ class tdx_auth(metaclass=_tdx_auth_meta):
         client_key: str,
         logger: Logger
     ):
-        self.client_id = client_id
-        self.client_key = client_key
-        self.logger = logger
-        self._token: str | None = None
-        self._expire_time = self.__timenow - 60 # Force initial token retrieval
-        self.logger.debug(f"[TDXAuth]-Initialized: {client_id}")
-        self._token_lock = Lock() # Lock for thread-safe token refresh
+        object.__setattr__(self, "client_id", client_id)
+        object.__setattr__(self, "client_key", client_key)
+        object.__setattr__(self, "logger", logger)
+        object.__setattr__(self, "_token", None)
+        object.__setattr__(self, "_expire_time", self.__timenow - 60)
+        object.__setattr__(self, "_token_lock", Lock())
     
     @classmethod
     def without_logger(cls, client_id: str, client_key: str) -> "tdx_auth":
@@ -168,7 +167,7 @@ class tdx_auth(metaclass=_tdx_auth_meta):
         """
         from requests.exceptions import RequestException
         if self.__timenow > self._expire_time:
-            with self._token_lock:
+            with self._token_lock: # type: ignore[union-attr]
                 self.logger.debug("[TDXAuth]-Token expired, fetching a new one and updating cache")
                 if self.__timenow > self._expire_time:
                     try:
