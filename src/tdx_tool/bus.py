@@ -310,7 +310,8 @@ class tdx_bus(tdx_tool):
             data = self._fetch_combined_data(
                 prefix="v2/Bus/Shape",
                 params={
-                    "$select": ','.join(RouteShape.__struct_fields__)
+                    "$select": ','.join(RouteShape.__struct_fields__),
+                    "$orderby": "RouteUID asc"
                 },
                 decoder=decoder
             ),

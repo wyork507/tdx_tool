@@ -144,7 +144,7 @@ class tdx_auth(metaclass=_tdx_auth_meta):
         response.raise_for_status()
         # If successful, update the token and expiration time in the cache
         token_data = response.json()
-        self._expire_time = self.__timenow + token_data["expires_in"] - 60
+        object.__setattr__(self, "_expire_time", self.__timenow + token_data["expires_in"] - 60)
         self.logger.debug("[TDXAuth]-New token obtained successfully")
         return token_data["access_token"]
 
@@ -171,7 +171,7 @@ class tdx_auth(metaclass=_tdx_auth_meta):
                 self.logger.debug("[TDXAuth]-Token expired, fetching a new one and updating cache")
                 if self.__timenow > self._expire_time:
                     try:
-                        self._token = self.update_token()
+                        object.__setattr__(self, "_token", self.update_token())
                     except RequestException as e:
                         if self._token is not None:
                             self.logger.warning(

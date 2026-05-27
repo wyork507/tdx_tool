@@ -2,7 +2,8 @@
 from logging import Logger
 import pandas as pd
 import geopandas as gpd
-import shapely
+from shapely import LineString
+import polyline
 # Local imports
 from .common_parsers import _parsers, with_tqdm
 from .bus_models import DailySchedule, Route, RouteShape, RouteStops, Alert, Schedule, Operator, StationFraction, Station
@@ -17,76 +18,81 @@ class _bus_parsers(_parsers):
         try: return Direction(direction).name
         except Exception: return None
     
+    # ====================
     # MARK: Routes Parsers
+    # ====================
+
     @with_tqdm(arg_names=["routes"], desc="Parsing routes", unit="route")
     def parse_routes(self, routes: list[Route]) -> pd.DataFrame:
-        """
-        """
         data = []
-        for r in routes:
-            operators = pd.DataFrame([{
-                "OperatorID": op.OperatorID,
-                **op.OperatorName.flat("OperatorName")
-            } for op in r.Operators])
-            route_base = {
-                "RouteUID": r.RouteUID,
-                **r.RouteName.flat("RouteName"),
-                "BusRouteType": r.BusRouteType,
-                "Operators": operators,
-                "UpdateTime": self.decoding_datetime(r.UpdateTime),
-                "RouteDepartureZh": r.DepartureStopNameZh,
-                "RouteDepartureEn": r.DepartureStopNameEn,
-                "RouteDestinationZh": r.DestinationStopNameZh,
-                "RouteDestinationEn": r.DestinationStopNameEn,
-            }
-            if not r.SubRoutes:
-                data.append(route_base)
-                continue
-            for sub in r.SubRoutes:
-                row = {
-                    **route_base,
-                    "SubRouteUID": sub.SubRouteUID,
-                    **sub.SubRouteName.flat("SubRouteName"),
-                    "Direction": self.__parse_direction(sub.Direction),
-                    "Headsign": sub.Headsign,
-                    "SubDepartureZh": sub.DepartureStopNameZh,
-                    "SubDepartureEn": sub.DepartureStopNameEn,
-                    "SubDestinationZh": sub.DestinationStopNameZh,
-                    "SubDestinationEn": sub.DestinationStopNameEn
-                }
-                data.append(row)
+        for route in routes:
+            base = self.flat_struct(route,
+                skip_fields=["Operators", "SubRoutes"]
+            )
+            base["Operators"] = pd.DataFrame([
+                self.flat_struct(operator) for operator in route.Operators
+            ])
+            if not route.SubRoutes:
+                data.append(base)
+            else:
+                for subroute in route.SubRoutes:
+                    data.append({
+                        **base,
+                        **self.flat_struct(subroute)
+                    })
         return pd.DataFrame(data)
     
+    # ====================
+    # MARK: Shapes Parsers
+    # ====================
+
     @with_tqdm(arg_names=["routes"], desc="Parsing routes with shapes", unit="route")
-    def parse_route_with_shape(self, routes: list[RouteShape]) -> pd.DataFrame:
+    def parse_route_with_shape(self, routes: list[RouteShape], coordinate: str) -> gpd.GeoDataFrame:
         """
         """
-        def decode_geometry(geom_str: str | None) -> shapely.geometry.base.BaseGeometry | None:
-            try:
-                return shapely.wkt.loads(geom_str) # type: ignore
-            except Exception as e:
-                self.logger.warning(f"Failed to parse geometry: {e}")
-                return None
+        def decode_line(p_str: str) -> LineString:
+            return LineString([(lon, lat) for lat, lon in polyline.decode(p_str)])
+        
         data = []
-        for r in routes:
+        for route in routes:
             data.append({
-                "RouteUID": r.RouteUID,
-                "SubRouteUID": r.SubRouteUID,
-                **r.RouteName.flat("RouteName"),
-                "Direction": self.__parse_direction(r.Direction),
-                "UpdateTime": self.decoding_datetime(r.UpdateTime),
-                "geometry": decode_geometry(r.Geometry)
+                **self.flat_struct(route, skip_fields=["EncodedPolyline"]),
+                "geometry": decode_line(route.EncodedPolyline)
             })
-        return pd.DataFrame(data)
+        return gpd.GeoDataFrame(data, crs=coordinate)
     
+    # ===================
+    # MARK: Stops Parsers
+    # ===================
+
+    @with_tqdm(arg_names=["route_stops"], desc="Parsing stops", unit="stop")
+    def parse_stops(self, route_stops: list[RouteStops], coordinate: str) -> gpd.GeoDataFrame:
+        """
+        """
+        data = []
+        for route in route_stops:
+            base = self.flat_struct(route, skip_fields=["Stops"])
+            for stop in route.Stops:
+                data.append({**base, **self.flat_struct(stop)})
+        return gpd.GeoDataFrame(data, crs=coordinate)
+    
+    # TODO: This is so hard to complete, later to do
+    @with_tqdm(arg_names=["route_stops"], desc="Parsing stops", unit="route")
+    def stops_joined_shape(self, route_stops: list[RouteStops], route_shapes: list[RouteShape], coordinate: str) -> gpd.GeoDataFrame | None:
+        """
+        """
+        pass
+
+    # ======================
     # MARK: Stations Parsers
+    # ======================
+
     @with_tqdm(arg_names=["route_stops", "station_fractions"], desc="Parsing stations", unit="station")
     def parse_stations(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, Station]:
         """
         """
-        from threading import Lock
-        from .bus_models import Stop, StationFraction
-
+        # XXX: oh my god, this is so hard to complete, later to do
+        from .bus_models import Stop
         stops: dict[str, list[Stop]] = {}
         for route in route_stops:
             for s in route.Stops:
@@ -96,6 +102,10 @@ class _bus_parsers(_parsers):
                 stops[geohash] += [s]
         
         data: dict[str, Station] = {}
+
+        # FIXME: By inspecting, the geohash for a station is not unique, due to the different precision of original coor.
+        # which means the logic of grouping station need to adjust to avoid the case that multiple stations share the same
+        # geohash, but they are not the same station.
         hash_map: dict[str, set[str]] = {} # geohash -> StationUID
         for station in station_fractions:
             geohash = station.StationPosition.GeoHash
@@ -119,143 +129,101 @@ class _bus_parsers(_parsers):
         """
         data = []
         for route in route_stops:
-            for s in route.Stops:
+            base = self.flat_struct(route, skip_fields=["Stops"])
+            for stop in route.Stops:
                 data.append({
-                    "StationID": s.StationID,
-                    "StationGroupID": s.StationGroupID,
-                    "StopUID": s.StopUID,
-                    **s.StopName.flat("StopName"),
-                    "RouteUID": route.RouteUID,
-                    **route.RouteName.flat("RouteName"),
-                    "SubRouteUID": route.SubRouteUID,
-                    **route.SubRouteName.flat("SubRouteName"),
+                    **base,
                     "Direction": self.__parse_direction(route.Direction),
-                    "Sequence": s.StopSequence,
-                    "Boarding": s.StopBoarding,
                     "OperatorIDs": ",".join([op.OperatorID for op in route.Operators]),
-                    "City": route.City,
-                    "CityCode": route.CityCode,
-                    "UpdateTime": route.UpdateTime,
-                    "PositionLon": s.StopPosition.PositionLon,
-                    "PositionLat": s.StopPosition.PositionLat,
-                    "GeoHash": s.StopPosition.GeoHash
+                    **self.flat_struct(stop, skip_fields=["Direction", "OperatorIDs"])    
                 })
         return pd.DataFrame(data)
     
+    # =======================
     # MARK: Operators Parsers
+    # =======================
+
     @with_tqdm(arg_names=["operators"], desc="Parsing operators", unit="operator")
     def parse_operators(self, operators: list[Operator]) -> pd.DataFrame:
         """
         """
         data = []
-        for op in operators:
-            data.append({
-                "OperatorID": op.OperatorID,
-                "OperatorNameZh": op.OperatorName.Zh_tw,
-                "OperatorNameEn": op.OperatorName.En
-            })
+        for operator in operators:
+            data.append(self.flat_struct(operator))
         return pd.DataFrame(data)
     
+    # ====================
     # MARK: Alerts Parsers
-    def parse_alerts(self,alerts: list[Alert]) -> pd.DataFrame:
-        data = []
-        for a in alerts:
-            base = pd.DataFrame()
-            base["AlertID"] = a.AlertID
-            base["TitleZh"] = a.Title
-            base["Description"] = a.Description
-            base["Department"] = a.Department
-            base["Status"] = a.Status
-            base["SrcUpdateTime"] = a.SrcUpdateTime
-            base["UpdateTime"] = a.UpdateTime
-            s: dict = a.Scope # type: ignore
-            if a.Status == 1:
-                data.append(base)
-            else:
-                base["Cause"] = a.Cause
-                base["Effect"] = a.Effect
-                base["PublishTime"] = a.PublishTime
-                base["StartTime"] = a.StartTime
-                base["EndTime"] = a.EndTime
-                base["UpdateTime"] = self.decoding_datetime(a.UpdateTime)
-                scope: pd.DataFrame = pd.json_normalize(
-                    s, record_path = list(s.keys()), sep = ""
-                    )
-                for _, row in scope.iterrows():
-                    base_copy = base.copy()
-                    for key, value in row.items():
-                        base_copy[key] = value
-                    data.append(base_copy)
+    # ====================
 
-        return pd.concat(data, axis=0, ignore_index=True)
+    @with_tqdm(arg_names=["alerts"], desc="Parsing alerts", unit="alert")
+    def parse_alerts(self, alerts: list[Alert]) -> pd.DataFrame:
+        data: list[dict] = []
+        for alert in alerts:
+            base = self.flat_struct(alert, skip_fields=["Scope"])
+            # Keep backward-compatible column naming.
+
+            scope = alert.Scope
+            if alert.Status == 1 or not scope:
+                data.append(base)
+                continue
+
+            scope_df = pd.json_normalize(scope, record_path=list(scope.keys()), sep="")
+            if scope_df.empty:
+                data.append(base)
+                continue
+            for row in scope_df.to_dict(orient="records"):
+                data.append({**base, **row})
+                
+        return pd.DataFrame(data)
     
+    # =======================
     # MARK: Schedules Parsers
+    # =======================
+    
     def __flat_route_info(self, schedule: Schedule | DailySchedule) -> dict:
         return {
-            "RouteUID": schedule.RouteUID,
-            "SubRouteUID": schedule.SubRouteUID,
-            "Direction": self.__parse_direction(schedule.Direction),
-            "OperatorID": schedule.OperatorID,
-            "UpdateTime": self.decoding_datetime(schedule.UpdateTime)
+            **self.flat_struct(schedule, skip_fields=["Timetables", "Frequencys", "Direction"]),
+            "Direction": self.__parse_direction(schedule.Direction)
         }
-    
+
     def __parse_timtable(self, schedule: Schedule | DailySchedule, only_departure_station: bool = False) -> list:
-        from .bus_models import Timetable
+        from .bus_models import DailyTimetable
         data = []
         route_base = self.__flat_route_info(schedule)
         for trip in schedule.Timetables:
-            trip_base: dict = {
-                "TripID": trip.TripID
-            }
-            if isinstance(trip, Timetable):
-                trip_base["IsLowFloor"] = trip.IsLowFloor
-                for stop in trip.StopTimes:
-                    if stop.StopSequence != 1 and only_departure_station:
-                        break
-                    for day in trip.ServiceDay.service_days:
-                        row = {
-                            **route_base,
-                            **trip_base,
-                            "StopSequence": stop.StopSequence,
-                            "ServiceDay": day,
-                            **stop.StopName.flat("StopName"),
-                            "ArrivalTime": self.decode_time(stop.ArrivalTime),
-                            "DepartureTime": self.decode_time(stop.DepartureTime)
-                        }
-                        data.append(row)
-            else:
-                for stop in trip.StopTimes:
-                    if stop.StopSequence != 1 and only_departure_station:
-                        break
-                    row = {
-                        **route_base,
-                        **trip_base,
-                        "StopSequence": stop.StopSequence,
-                        "ServiceDate": self.decode_date(schedule.BusDate), # type: ignore
-                        **stop.StopName.flat("StopName"),
-                        "ArrivalTime": self.decode_time(stop.ArrivalTime),
-                        "DepartureTime": self.decode_time(stop.DepartureTime),
-                        "IsEstimatedTime": stop.is_estimated_time
-                    }
-                    data.append(row)
-                    if only_departure_station:
-                        break
+            trip_base = self.flat_struct(trip, skip_fields=["StopTimes", "ServiceDay", "SpecialDays"])
+            for stop in trip.StopTimes:
+                if stop.StopSequence != 1 and only_departure_station:
+                    break
+                stop_base = {
+                    **route_base,
+                    **trip_base,
+                    **self.flat_struct(stop, time_fields=["ArrivalTime", "DepartureTime"], skip_fields=["TimeType"])
+                }
+                if isinstance(trip, DailyTimetable):
+                    data.append({
+                        "IsEstimatedTime": stop.is_estimated_time, # type: ignore[union-attr]
+                        **stop_base
+                    })
+                for day in trip.ServiceDay.service_days: # type: ignore[union-attr]
+                    data.append({
+                        "ServiceDay": day,
+                        **stop_base
+                    })
         return data
     
     def __parse_frequency(self, schedule: Schedule) -> list:
         data = []
         route_base = self.__flat_route_info(schedule)
         for period in schedule.Frequencys:
+            period_base = self.flat_struct(period, time_fields=["StartTime", "EndTime"], skip_fields=["ServiceDay"])
             for day in period.ServiceDay.service_days:
-                row = {
+                data.append({
                     **route_base,
+                    **period_base,
                     "ServiceDay": day,
-                    "StartTime": self.decode_time(period.StartTime),
-                    "EndTime": self.decode_time(period.EndTime),
-                    "MinHeadwayMins": period.MinHeadwayMins,
-                    "MaxHeadwayMins": period.MaxHeadwayMins
-                }
-                data.append(row)
+                })
         return data
     
     def parse_schedules_for_departures(self, schedules: list[Schedule | DailySchedule]) -> pd.DataFrame:

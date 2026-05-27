@@ -126,7 +126,7 @@ class Datas:
     
     def __get_or_parse(self, output_type: Type[OutputType]) -> OutputType | None:
         if output_type in self.__cache: # already parsed, return cached result
-            return self.__cache[output_type]
+            return self.__cache[output_type].copy()
         if output_type not in self.__parsers: # not supported
             return None
         # First time parsing, then cache the result

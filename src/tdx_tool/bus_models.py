@@ -172,7 +172,6 @@ class RouteShape(ms.Struct, kw_only=True):
     RouteName: I18n
     Direction: int
     EncodedPolyline: str
-    Geometry: Optional[str] = None
     UpdateTime: str
 
 class Alert(ms.Struct, kw_only=True):
