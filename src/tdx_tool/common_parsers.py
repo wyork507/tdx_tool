@@ -3,11 +3,14 @@ from datetime import time, date
 from functools import wraps
 from logging import Logger
 from tqdm.auto import tqdm
+from typing import Callable, Any
 from msgspec import Struct
 import pandas as pd
 import inspect
 # Local imports
 from .common_models import I18n, PointPosition, DataclassInstance
+
+FieldsName = str
 
 class _parsers:
     def __init__(self, logger: Logger):
@@ -32,10 +35,12 @@ class _parsers:
     def flat_struct(self,
         data: Struct | DataclassInstance,
         point_prefix: str | None = None,
-        date_fields: list[str] | None = None,
-        time_fields: list[str] | None = None,
-        datetime_fields: list[str] = [],
-        skip_fields: list[str] | None = None
+        date_fields: list[FieldsName] | None = None,
+        time_fields: list[FieldsName] | None = None,
+        datetime_fields: list[FieldsName] | None = None,
+        skip_fields: list[FieldsName] | None = None,
+        rename_fields: dict[FieldsName, FieldsName] | None = None,
+        convertors: dict[FieldsName, Callable[[Any], Any]] | None = None
     ) -> dict:
         """
         Flatten a Struct object into a dictionary.
@@ -51,29 +56,32 @@ class _parsers:
             if skip_fields and key in skip_fields:
                 continue
             value = getattr(data, key)
+            new_key = rename_fields[key] if rename_fields and key in rename_fields else key
             if key != "UpdateTime":
                 if date_fields and key in date_fields:
-                    result[key] = self.decode_date(value)
+                    result[new_key] = self.decode_date(value)
                     continue
                 if time_fields and key in time_fields:
-                    result[key] = self.decode_time(value)
+                    result[new_key] = self.decode_time(value)
                     continue
-                if len(datetime_fields) > 0 and key in datetime_fields:
-                    result[key] = self.decoding_datetime(value)
+                if datetime_fields and key in datetime_fields:
+                    result[new_key] = self.decoding_datetime(value)
                     continue
             
             # Normal fields handling
             if isinstance(value, I18n):
-                result = {**result, **value.flat(key)}
+                result = {**result, **value.flat(new_key)}
             elif isinstance(value, PointPosition):
                 if point_prefix:
-                    result = {**result, **value.flat(point_prefix)}
+                    result = {**result, **value.flat(new_key)}
                 else:
                     result = {**result, **value.flat_without_prefix}
             elif key == "UpdateTime" and isinstance(value, str):
-                result[key] = self.decoding_datetime(value)
+                result[new_key] = self.decoding_datetime(value)
+            elif convertors and key in convertors:
+                result[new_key] = convertors[key](value)
             else:
-                result[key] = value
+                result[new_key] = value
         return result
     
 def with_tqdm(arg_names: list[str], desc: str = "Processing", unit: str = "it", pos: int = 0, **tqdm_kwargs):

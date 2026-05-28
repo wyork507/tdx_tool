@@ -9,7 +9,7 @@ import geopandas as gpd
 from tdx_tool.authority import tdx_auth
 # Local imports
 from .bus_parsers import _bus_parsers
-from .bus_models import RouteStops, Station, Operator, Alert, Schedule, DailySchedule
+from .bus_models import RouteStops, Station, Operator, Schedule, DailySchedule, Alert
 from .core import tdx_tool
 from .common_models import Datas
 from .utils import BusRegion
@@ -257,18 +257,24 @@ class tdx_bus(tdx_tool):
             decoder=decoder
         )
     
+    @property
+    def __region_description(self) -> str:
+        match self.region:
+            case BusRegion.Intercity:
+                return "intercity bus (governed by MOTC)"
+            case BusRegion.Taipei | BusRegion.New_Taipei if self._together:
+                return "Taipei Metropolitan Area (including Taipei and New Taipei)"
+            case _ if self._together:
+                return f"{self.region.shared_name} city and county"
+            case _:
+                return f"{self.region.value.en}"
+    
     @cached_property
     def routes(self) -> Datas:
         """all bus route for the specified region(s)"""
         from .bus_models import Route
-
         def decoder(response: requests.Response) -> list[Route]:
             return msgspec.json.decode(response.content, type=list[Route])
-        
-        def to_datafram(data: list[Route]) -> pd.DataFrame:
-            return self._parsers.parse_routes(
-                data
-            ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
         
         return Datas(
             data = self._fetch_combined_data(
@@ -279,32 +285,17 @@ class tdx_bus(tdx_tool):
                 decoder=decoder),
             datatype = Route,
             parsers = {
-                pd.DataFrame: to_datafram
+                pd.DataFrame: self._parsers.parse_routes
             },
-            description = f"All bus routes for region(s) {', '.join(self._url_middle_part())}."
+            description = f"All bus routes for {self.__region_description}."
         )
     
     @cached_property
     def routes_with_shape(self) -> Datas:
         """all bus route with shape information for the specified region(s)"""
         from .bus_models import RouteShape
-
         def decoder(response: requests.Response) -> list[RouteShape]:
             return msgspec.json.decode(response.content, type=list[RouteShape])
-        
-        def to_datafram(data: list[RouteShape]) -> pd.DataFrame:
-            return self._parsers.parse_route_with_shape(
-                data
-            ).sort_values(by=["RouteNameEn", "SubRouteUID"]).reset_index(drop=True)
-        
-        def to_geodatafram(data: list[RouteShape]) -> gpd.GeoDataFrame:
-            new_data = to_datafram(data).join(
-                self.routes.to_dataframe.set_index(["RouteUID", "SubRouteUID"]),
-                on=["RouteUID", "SubRouteUID"],
-                how="left",
-                rsuffix="_route"
-            )
-            return gpd.GeoDataFrame(new_data, geometry="geometry", crs=self.default_coor)
 
         return Datas(
             data = self._fetch_combined_data(
@@ -317,41 +308,35 @@ class tdx_bus(tdx_tool):
             ),
             datatype = RouteShape,
             parsers = {
-                pd.DataFrame: to_geodatafram,
-                gpd.GeoDataFrame: to_geodatafram
+                pd.DataFrame: self._parsers.parse_shapes_to_df,
+                gpd.GeoDataFrame: self._parsers.parse_shapes_to_gdf
             },
-            description = f"All bus routes with shape information for region(s) {', '.join(self._url_middle_part())}."
+            description = f"All bus routes with shape information for {self.__region_description}."
         )
 
     @cached_property
-    def stations(self) -> list[Station]:
+    def stations(self) -> Datas:
         """all bus stations for the specified region(s)"""
         from .bus_models import StationFraction
         def decoder(response: requests.Response) -> list[StationFraction]:
             return msgspec.json.decode(response.content, type=list[StationFraction])
-
-        return list(self._parsers.parse_stations(
-            self._route_stops,
-            self._fetch_combined_data(
-                prefix="v2/Bus/Station",
-                params={
-                    "$select": ','.join(StationFraction.__struct_fields__)
-                },
-                decoder=decoder
-            )
-        ).values())
-    
-    @cached_property
-    def stations_to_dataframe(self) -> pd.DataFrame:
-        """all bus stations for the specified region(s), in a tabular format with geometry"""
-        data = self._parsers.parse_stations_to_dataframe(self._route_stops)
-        data = data.sort_values(by=["StationID", "SubRouteNameEn", "Sequence"]).reset_index(drop=True)
-        coor = data[["PositionLon", "PositionLat"]]
-        self.logger.debug(f"Creating GeoDataFrame with {len(data)} stations.")
-        return gpd.GeoDataFrame(
-            data.drop(columns=["PositionLon", "PositionLat"]),
-            geometry = gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
-            crs = self.default_coor
+        
+        data = self._fetch_combined_data(
+            prefix="v2/Bus/Station",
+            params={
+                "$select": ','.join(StationFraction.__struct_fields__)
+            },
+            decoder=decoder
+        )
+        stations_map = self._parsers.parse_stations(self._route_stops, data)
+        stations = [s for station_list in stations_map.values() for s in station_list]
+        return Datas(
+            data=stations,
+            datatype = Station,
+            parsers = {
+                pd.DataFrame: lambda _stations: self._parsers.parse_stations_to_df(self._route_stops)
+            },
+            description = f"All bus stations for {self.__region_description}."
         )
     
     @cached_property

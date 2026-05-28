@@ -2,6 +2,7 @@
 from logging import Logger
 from typing import Literal, Callable, TypeVar, overload
 from datetime import datetime
+from random import random
 from requests import Response
 from msgspec import Struct
 import pandas as pd
@@ -228,16 +229,20 @@ class tdx_tool:
             result: list[T] = []
             top_size = 500 # Number of records to fetch per request
             skip = 0
+            count = 0
             
             while True:
                 suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
                 # Add pagination parameters
-                request_params = params.copy() if params else {}
-                request_params["$top"] = top_size
-                request_params["$skip"] = skip
                 
                 self.logger.debug(f"Fetching data from URL: {suffix_url} (skip={skip}, top={top_size})")
-                response = self._get_data_from_suffix_url(suffix_url, params=request_params)
+                response = self._get_data_from_suffix_url(
+                    suffix_url,
+                    params={
+                        **params,
+                        "$top": top_size,
+                        "$skip": skip
+                })
                 batch = decoder(response)
                 
                 result.extend(batch)
@@ -245,8 +250,12 @@ class tdx_tool:
                 # If we received fewer items than requested, we've reached the end
                 if len(batch) < top_size:
                     break
-                time.sleep(0.05)
+                if count> 0 and count % 5 == 0:
+                    time.sleep(random()*0.5+0.2)
+                else:
+                    time.sleep(random()*0.3+0.05)
                 skip += top_size
+                count += 1
             
             return result
         

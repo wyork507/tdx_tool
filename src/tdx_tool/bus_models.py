@@ -1,6 +1,6 @@
 # Dependencies
 from dataclasses import dataclass, field
-from enum import IntEnum, Enum
+from enum import IntEnum, StrEnum
 from typing import List, Optional
 import msgspec as ms
 # Local imports
@@ -19,7 +19,18 @@ class BusRouteType(IntEnum):
     Highway    = 13 # 國道客運
     Shuttle    = 14 # 接駁車
 
-class ServiceStatus(Enum):
+class Bearing(StrEnum):
+    Eastward  = "E"
+    Westward  = "W"
+    Southward = "S"
+    Northward = "N"
+    Southeast = "SE"
+    Northeast = "NE"
+    Southwest = "SW"
+    Northwest = "NW"
+
+
+class ServiceStatus(StrEnum):
     Cancel = "停駛"
     Normal = "正常"
     Errors = "異常"
@@ -120,9 +131,10 @@ class Stop(ms.Struct, kw_only=True):
     StationID: str
     StationGroupID: Optional[str] = None
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class Station:
     StationUID: List[str]
+    StationID: str
     StationPosition: PointPosition
     StationName: I18n
     StationAddress: Optional[str] = None
@@ -133,20 +145,24 @@ class Station:
     UpdateTime: str
 
     @classmethod
-    def from_fraction(cls, station: "StationFraction", stops: List[Stop]) -> "Station":
+    def from_fraction(cls, station: List["StationFraction"], stops: List[Stop]) -> "Station":
         return cls(
-            StationUID=[station.StationUID],
-            StationPosition=station.StationPosition,
-            StationName=I18n(Zh_tw=stops[0].StopName.Zh_tw, En=stops[0].StopName.En),
-            StationAddress=station.StationAddress,
+            StationUID=[s.StationUID for s in station],
+            StationID=station[0].StationID,
+            StationPosition=station[0].StationPosition,
+            StationName=stops[0].StopName,
+            StationAddress=station[0].StationAddress,
             StationGroupID=stops[0].StationGroupID,
-            LocationCityCode=station.LocationCityCode,
-            Bearing=station.Bearing,
-            UpdateTime=station.UpdateTime
+            Stops=stops,
+            LocationCityCode=station[0].LocationCityCode,
+            Bearing=station[0].Bearing,
+            UpdateTime=station[0].UpdateTime
         )
 
 class StationFraction(ms.Struct, kw_only=True):
     StationUID: str
+    StationID: str
+    StationName: I18n
     StationPosition: PointPosition
     StationAddress: Optional[str] = None
     LocationCityCode: Optional[str] = None
@@ -157,13 +173,13 @@ class StationFraction(ms.Struct, kw_only=True):
 class RouteStops(ms.Struct, kw_only=True):
     RouteUID: str
     RouteName: I18n
-    Operators: List[Operator] = [] # type: ignore
+    Operators: List[Operator] = []
     SubRouteUID: str
     SubRouteName: I18n
     Direction: int
     City: str
     CityCode: str
-    Stops: List[Stop] = [] # type: ignore
+    Stops: List[Stop] = []
     UpdateTime: str
 
 class RouteShape(ms.Struct, kw_only=True):
@@ -193,7 +209,7 @@ class Period(ms.Struct, kw_only=True):
     StartDate: str
     EndDate: str
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class SpecialDay:
     Dates: List[str]
     DatePeriod: Optional[Period] = None
@@ -204,7 +220,7 @@ class SpecialDay:
     def status(self) -> "ServiceStatus":
         return ServiceStatus.from_timetable(self.ServiceStatus) # type: ignore
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class ServiceDay:
     ServiceTag: Optional[str] = None
     Monday: int
@@ -261,7 +277,7 @@ class StopTime(ms.Struct, kw_only=True):
     ArrivalTime: Optional[str] = None
     DepartureTime: Optional[str] = None
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class StopTimeDetail:
     StopUID: str
     StopSequence: int

@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from typing import (
     Optional, Callable, Dict, Type, Protocol, Any,
-    Union, TypeVar, List, overload, ClassVar, TYPE_CHECKING
+    Union, TypeVar, List, overload, ClassVar, TYPE_CHECKING,
+    ParamSpec,
+    Concatenate as C
 )
 from pandas import DataFrame
 from geopandas import GeoDataFrame
@@ -13,7 +15,7 @@ class DataclassInstance(Protocol):
 
 DataType = TypeVar("DataType", bound=Union[DataclassInstance, Struct])
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class I18n:
     Zh_tw: str
     En: Optional[str] = None
@@ -29,7 +31,7 @@ class I18n:
                 data[f"{prefix}{lang}"] = value
         return data
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PointPosition:
     PositionLon: float
     PositionLat: float
@@ -48,7 +50,7 @@ class PointPosition:
     def flat_without_prefix(self) -> dict[str, float | str]:
         return self.flat(prefix="")
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Identity:
     code: str
     zh: str
@@ -73,7 +75,8 @@ class Datas:
         xarray DataArray converted from the data list, suitable for multi-dimensional data
     """
     OutputType = Union[DataFrame, GeoDataFrame, DataArray]
-    ParsersType = Callable[[list[DataType]], OutputType]
+    P = ParamSpec("P")
+    ParsersType = Callable[C[list[DataType], P], OutputType]
     datatype: Type[Struct | DataclassInstance]
     hasSpatial: bool
     __datas: list[Struct | DataclassInstance]

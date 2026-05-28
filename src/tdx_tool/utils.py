@@ -169,6 +169,19 @@ class BusRegion(Enum):
         return self.value.api_tag
 
     @cached_property
+    def shared_name(self) -> str | None:
+        """if two regions share the same name, else None"""
+        match self:
+            case BusRegion.Hsinchu | BusRegion.HsinchuCity:
+                return "Hsinchu"
+            case BusRegion.Chiayi | BusRegion.ChiayiCity:
+                return "Chiayi"
+            case BusRegion.Taipei | BusRegion.New_Taipei:
+                return "Taipei"
+            case _:
+                return None
+    
+    @cached_property
     def ambiguous_case(self) -> "BusRegion | None":
         """
         Returns the ambiguous region name if it exists.
@@ -192,20 +205,18 @@ class BusRegion(Enum):
         None
         """
         ambiguos: dict[str, set[Identity]] = {
-            "Hsinchu": set([ZONES["HSZ"], ZONES["HSQ"]]),
-            "Chiayi":  set([ZONES["CYI"], ZONES["CYQ"]]),
-            "Taipei":  set([ZONES["TPE"], ZONES["NWT"]])
+            "Hsinchu": {ZONES["HSZ"], ZONES["HSQ"]},
+            "Chiayi":  {ZONES["CYI"], ZONES["CYQ"]},
+            "Taipei":  {ZONES["TPE"], ZONES["NWT"]}
         }
-        name = self.value.en.split()[0]
-        if name == "New":
-            name = "Taipei"
-        
-        if name in ambiguos.keys():
-            other_identity = (ambiguos[name] - set([self.value])).pop()
-            for region in BusRegion:
-                if region.value == other_identity:
-                    return region
-        return None
+        name = self.shared_name
+        if name is None:
+            return None
+        other_identity = (ambiguos[name] - set([self.value])).pop()
+        for region in BusRegion:
+            if region.value == other_identity:
+                return region
+            
 
 class BikeRegion(Enum):
     """

@@ -1,70 +1,136 @@
 # Dependencies
+from collections import defaultdict
 from logging import Logger
+from typing import Literal
 import pandas as pd
 import geopandas as gpd
 from shapely import LineString
 import polyline
 # Local imports
 from .common_parsers import _parsers, with_tqdm
-from .bus_models import DailySchedule, Route, RouteShape, RouteStops, Alert, Schedule, Operator, StationFraction, Station
+from .bus_models import (
+    Route, RouteShape,
+    Station, StationFraction,
+    RouteStops, Stop,
+    Operator,
+    Alert,
+    DailySchedule, Schedule
+)
 
 
 class _bus_parsers(_parsers):
     def __init__(self, logger: Logger):
         super().__init__(logger)
     
-    def __parse_direction(self, direction: int) -> str | None:
+    def __decode_direction(self, direction: int) -> str | None:
         from .bus_models import Direction
         try: return Direction(direction).name
         except Exception: return None
     
+    def __decode_route_type(self, route_type: int) -> str | None:
+        from .bus_models import BusRouteType as RouteType
+        try: return RouteType(route_type).name
+        except Exception: return None
+    
+    def __decode_bearing(self, bearing: str) -> str | None:
+        from .bus_models import Bearing
+        try: return Bearing(bearing).name
+        except Exception: return None
+    
+    def __decode_status(self, status: int, source: Literal["Alert", "ServiceStatus"]) -> str | None:
+        from .bus_models import ServiceStatus
+        status_case: ServiceStatus | None
+        match source:
+            case "Alert":
+                status_case = ServiceStatus.from_alert(status)
+            case "ServiceStatus":
+                status_case = ServiceStatus.from_timetable(status)
+            case _:
+                return None
+        if status_case is None:
+            return None
+        else:
+            return status_case.value
+    
+    def __decode_error_cause(self, error_cause: int) -> str | None:
+        from .bus_models import ServiceStatus
+        try: return ServiceStatus(error_cause).name
+        except Exception: return None
+    
+    def __stract_operators(self, operators: list[Operator]) -> list[str]:
+        return [operator.OperatorID for operator in operators]
+    
+
+    
     # ====================
     # MARK: Routes Parsers
     # ====================
-
     @with_tqdm(arg_names=["routes"], desc="Parsing routes", unit="route")
     def parse_routes(self, routes: list[Route]) -> pd.DataFrame:
         data = []
         for route in routes:
             base = self.flat_struct(route,
-                skip_fields=["Operators", "SubRoutes"]
+                skip_fields=["SubRoutes"],
+                rename_fields={"Operators": "RouteOperatorIDs"},
+                convertors={"Operators": self.__stract_operators}
             )
-            base["Operators"] = pd.DataFrame([
-                self.flat_struct(operator) for operator in route.Operators
-            ])
-            if not route.SubRoutes:
-                data.append(base)
+            if len(route.SubRoutes) == 0:
+                data.append({
+                    **base,
+                    "SubRouteUID": route.RouteUID
+                })
             else:
                 for subroute in route.SubRoutes:
                     data.append({
                         **base,
-                        **self.flat_struct(subroute)
+                        **self.flat_struct(subroute,
+                            rename_fields={"OperatorIDs": "SubRouteOperatorIDs"},
+                            convertors={
+                                "Direction": self.__decode_direction,
+                                "OperatorIDs": self.__stract_operators
+                            }
+                        )
                     })
-        return pd.DataFrame(data)
+        return pd.DataFrame(
+            data
+        ).sort_values(by=["RouteNameEn", "SubRouteUID"]
+        ).reset_index(drop=True)
     
     # ====================
     # MARK: Shapes Parsers
     # ====================
-
-    @with_tqdm(arg_names=["routes"], desc="Parsing routes with shapes", unit="route")
-    def parse_route_with_shape(self, routes: list[RouteShape], coordinate: str) -> gpd.GeoDataFrame:
-        """
-        """
-        def decode_line(p_str: str) -> LineString:
-            return LineString([(lon, lat) for lat, lon in polyline.decode(p_str)])
-        
-        data = []
-        for route in routes:
-            data.append({
-                **self.flat_struct(route, skip_fields=["EncodedPolyline"]),
-                "geometry": decode_line(route.EncodedPolyline)
+    def __decode_polyline(self, p_str: str) -> LineString:
+        return LineString([(lon, lat) for lat, lon in polyline.decode(p_str)])
+    
+    @with_tqdm(arg_names=["route_shapes"], desc="Parsing route shapes", unit="route")
+    def __parse_route_shape(self, routes: list[RouteShape]) -> list[dict]:
+        return [{
+        "SubRouteUID": route.SubRouteUID if route.SubRouteUID is not None else route.RouteUID,
+        **self.flat_struct(route,
+            skip_fields=["SubRouteUID"],
+            rename_fields={"EncodedPolyline": "geometry"},
+            convertors={
+                "Direction": self.__decode_direction,
+                "EncodedPolyline": self.__decode_polyline
             })
-        return gpd.GeoDataFrame(data, crs=coordinate)
+        } for route in routes]
+    
+    def parse_shapes_to_df(self, routes: list[RouteShape]) -> pd.DataFrame:
+        return pd.DataFrame(
+            self.__parse_route_shape(routes)
+        ).sort_values(by=["RouteNameEn", "SubRouteUID"]
+        ).reset_index(drop=True)
+    
+    def parse_shapes_to_gdf(self, routes: list[RouteShape]) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(
+            self.__parse_route_shape(routes),
+            crs="EPSG:4326" # WGS 84
+        ).sort_values(by=["RouteNameEn", "SubRouteUID"]
+        ).reset_index(drop=True)
     
     # ===================
     # MARK: Stops Parsers
     # ===================
-
     @with_tqdm(arg_names=["route_stops"], desc="Parsing stops", unit="stop")
     def parse_stops(self, route_stops: list[RouteStops], coordinate: str) -> gpd.GeoDataFrame:
         """
@@ -73,7 +139,10 @@ class _bus_parsers(_parsers):
         for route in route_stops:
             base = self.flat_struct(route, skip_fields=["Stops"])
             for stop in route.Stops:
-                data.append({**base, **self.flat_struct(stop)})
+                data.append({
+                    **base,
+                    **self.flat_struct(stop)
+                })
         return gpd.GeoDataFrame(data, crs=coordinate)
     
     # TODO: This is so hard to complete, later to do
@@ -86,45 +155,44 @@ class _bus_parsers(_parsers):
     # ======================
     # MARK: Stations Parsers
     # ======================
-
-    @with_tqdm(arg_names=["route_stops", "station_fractions"], desc="Parsing stations", unit="station")
-    def parse_stations(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, Station]:
+    @with_tqdm(arg_names=["route_stops"], desc="Extracting station from routes", unit="route")
+    def __extract_stations(self, route_stops: list[RouteStops]) -> dict[str, list[Stop]]:
         """
+        Returns
+        -------
+        dict[str, list[Stop]]
+            StationID -> list of Station object
         """
-        # XXX: oh my god, this is so hard to complete, later to do
-        from .bus_models import Stop
-        stops: dict[str, list[Stop]] = {}
+        stations: dict[str, list[Stop]] = defaultdict(list)
         for route in route_stops:
-            for s in route.Stops:
-                geohash: str = s.StopPosition.GeoHash
-                if geohash not in stops:
-                    stops.setdefault(geohash, [])
-                stops[geohash] += [s]
-        
-        data: dict[str, Station] = {}
+            for stop in route.Stops:
+                stations[stop.StationID].append(stop)
+        return stations
 
-        # FIXME: By inspecting, the geohash for a station is not unique, due to the different precision of original coor.
-        # which means the logic of grouping station need to adjust to avoid the case that multiple stations share the same
-        # geohash, but they are not the same station.
-        hash_map: dict[str, set[str]] = {} # geohash -> StationUID
-        for station in station_fractions:
-            geohash = station.StationPosition.GeoHash
-            if geohash not in stops:
-                stops.setdefault(geohash, [])
-            if geohash not in hash_map:
-                hash_map.setdefault(geohash, set())
-                data[station.StationUID] = Station.from_fraction(
-                    station,
-                    stops[geohash]
-                )
-            else:
-                hash_map[geohash].add(station.StationUID)
-                self.logger.debug(f"Station {station.StationUID} shares geohash {geohash} with station(s) {hash_map[geohash]}")
-                data[station.StationUID].StationUID = list(hash_map[geohash])
+    @with_tqdm(arg_names=["station_info"], desc="Extracting station info...", unit="stations")
+    def __extract_station_info(self, station_info: list[StationFraction]) -> dict[str, list[StationFraction]]:
+        """
+        Returns
+        -------
+        dict[str, list[StationFraction]]
+            StationID -> list of StationFraction objects
+        """
+        station_info_map: dict[str, list[StationFraction]] = defaultdict(list)
+        for station in station_info:
+            station_info_map[station.StationID].append(station)
+        return station_info_map
+
+    def parse_stations(self, route_stops: list[RouteStops], station_fractions: list[StationFraction]) -> dict[str, list[Station]]:
+        """
+        """
+        data: dict[str, list[Station]] = defaultdict(list)
+        stations = self.__extract_stations(route_stops)
+        for station_id, station_info in self.__extract_station_info(station_fractions).items():
+            data[station_id].append(Station.from_fraction(station_info, stations[station_id]))
         return data
     
     @with_tqdm(arg_names=["route_stops"], desc="Parsing stations to DataFrame", unit="station")
-    def parse_stations_to_dataframe(self, route_stops: list[RouteStops]) -> pd.DataFrame:
+    def parse_stations_to_df(self, route_stops: list[RouteStops]) -> pd.DataFrame:
         """
         """
         data = []
