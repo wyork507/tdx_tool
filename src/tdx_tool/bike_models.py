@@ -1,6 +1,6 @@
 # Dependencies
 from enum import IntEnum
-from typing import List, Optional, TypeVar
+from typing import Optional
 import msgspec as ms
 # Local imports
 from .common_models import I18n, PointPosition

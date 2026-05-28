@@ -46,11 +46,11 @@ class tdx_rail(tdx_tool):
         from .utils import strings_into_identities as convertor
         identities = []
         try:
-            identities = convertor(operators, skip_invalid)
+            identities = convertor(regions, skip_invalid)
         except ValueError as e:
             raise e
         if skip_invalid and any(identity is None for identity in identities):
-            record = list(zip(operators, identities))
+            record = list(zip(regions, identities))
             for operator, identity in record:
                 if identity is not None:
                     record.remove((operator, identity))
@@ -63,3 +63,5 @@ class tdx_rail(tdx_tool):
     @classmethod
     def from_auth(cls, auth: tdx_auth, logger: Logger | None = None, operators: list[RailwayOperator] | None = None) -> "tdx_rail":
         return cls(client_id=auth.client_id, client_key=auth.client_key, operators=operators, logger=logger or auth.logger)
+    
+    
