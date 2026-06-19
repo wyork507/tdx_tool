@@ -5,6 +5,7 @@ from typing import (
     ParamSpec,
     Concatenate as C
 )
+from enum import StrEnum
 from pandas import DataFrame
 from geopandas import GeoDataFrame
 from xarray import DataArray
@@ -50,12 +51,125 @@ class PointPosition:
     def flat_without_prefix(self) -> dict[str, float | str]:
         return self.flat(prefix="")
 
+class ServiceStatus(StrEnum):
+    Cancel = "停駛"
+    Normal = "正常"
+    Errors = "異常"
+    Addion = "加班"
+
+    @classmethod
+    def from_alert(cls, alert_status: int) -> Optional["ServiceStatus"]:
+        for status in cls:
+            if status.alert_status == alert_status:
+                return status
+        return None
+    
+    @classmethod
+    def from_timetable(cls, timetable_status: int) -> Optional["ServiceStatus"]:
+        for status in cls:
+            if status.timetable_status == timetable_status:
+                return status
+        return None
+    
+    @property
+    def description(self) -> str:
+        return self.value
+
+    @property
+    def alert_status(self) -> Optional[int]:
+        match self:
+            case ServiceStatus.Cancel:
+                return 0
+            case ServiceStatus.Normal:
+                return 1
+            case ServiceStatus.Errors:
+                return 2
+            case _:
+                return None
+    
+    @property
+    def timetable_status(self) -> Optional[int]:
+        match self:
+            case ServiceStatus.Normal:
+                return 0
+            case ServiceStatus.Addion:
+                return 1
+            case ServiceStatus.Cancel:
+                return 2
+            case _:
+                return None
+
 @dataclass(frozen=True, slots=True)
 class Identity:
     code: str
     zh: str
     en: str
     api_tag: str
+
+class Operator(Struct, kw_only=True):
+    OperatorID: str
+    OperatorName: I18n
+
+class Period(Struct, kw_only=True):
+    StartDate: str
+    EndDate: str
+
+@dataclass(kw_only=True, slots=True)
+class ServiceDay:
+    ServiceTag: Optional[str] = None
+    Monday: int
+    Tuesday: int
+    Wednesday: int
+    Thursday: int
+    Friday: int
+    Saturday: int
+    Sunday: int
+    NationalHolidays: Optional[int] = None
+
+    def __item_for(self, boolean: bool, exclude: set[str] | None = None) -> list[str]:
+        if exclude is None:
+            exclude = set()
+        fields = ServiceDay.__dataclass_fields__.keys()
+        result = []
+        for name in fields - exclude - {"ServiceTag"}:
+            if getattr(self, name) == boolean:
+                result.append(name)
+        return result
+    
+    @property
+    def has_service_on_holidays(self) -> bool | None:
+        return self.NationalHolidays == 1 if self.NationalHolidays is not None else None
+    
+    @property
+    def flat(self) -> dict[str, bool]:
+        return {
+            "Monday": self.Monday == 1,
+            "Tuesday": self.Tuesday == 1,
+            "Wednesday": self.Wednesday == 1,
+            "Thursday": self.Thursday == 1,
+            "Friday": self.Friday == 1,
+            "Saturday": self.Saturday == 1,
+            "Sunday": self.Sunday == 1,
+        }
+    
+    @property
+    def service_days(self) -> list[str]:
+        return self.__item_for(True)
+
+@dataclass(kw_only=True, slots=True)
+class SpecialDay:
+    Dates: List[str]
+    DatePeriod: Optional[Period] = None
+    ServiceStatus: int
+    Description: Optional[str] = None
+
+    @property
+    def status(self) -> "ServiceStatus":
+        return ServiceStatus.from_timetable(self.ServiceStatus) # type: ignore
+
+# =====================
+# MARK: - Datas Wrapper
+# =====================
 
 class Datas:
     """
@@ -120,6 +234,7 @@ class Datas:
     
     @property
     def data(self) -> list[Struct | DataclassInstance]:
+        """return a copy of the original data list"""
         return self.__datas.copy()
     
     @property
@@ -129,7 +244,7 @@ class Datas:
     
     def __get_or_parse(self, output_type: Type[OutputType]) -> OutputType | None:
         if output_type in self.__cache: # already parsed, return cached result
-            return self.__cache[output_type].copy()
+            return self.__cache[output_type].copy(deep=False)
         if output_type not in self.__parsers: # not supported
             return None
         # First time parsing, then cache the result

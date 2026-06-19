@@ -277,6 +277,12 @@ class RailwayOperator(Enum):
         "Taiwan High Speed Rail Corporation",
         "THSR"
     )
+    INTER_AFR = Identity(
+        "AFR",
+        "阿里山林業鐵路及文化資產管理處",
+        "Alishan Forest Railway and Cultural Heritage Office",
+        "AFR"
+    )
     METRO_TPE = Identity(
         "TRTC",
         "臺北大眾捷運股份有限公司",
@@ -400,6 +406,17 @@ class RailwayRegion(Enum):
             return True
     
     @property
+    def hasAFR(self) -> bool:
+        """is covered by Alishan Forest Railway (AFR) service"""
+        if self in [
+            RailwayRegion.Chiayi,
+            RailwayRegion.ChiayiCity
+        ]:
+            return True
+        else:
+            return False
+    
+    @property
     def hasMetro(self) -> bool:
         """is covered by metro service"""
         if self in [
@@ -421,6 +438,8 @@ class RailwayRegion(Enum):
             ops.append(RailwayOperator.INTER_TRC)
         if self.hasHSR:
             ops.append(RailwayOperator.INTER_HSR)
+        if self.hasAFR:
+            ops.append(RailwayOperator.INTER_AFR)
         if self.hasMetro:
             match self:
                 case RailwayRegion.Taipei | RailwayRegion.New_Taipei:

@@ -201,7 +201,7 @@ class _bus_parsers(_parsers):
             for stop in route.Stops:
                 data.append({
                     **base,
-                    "Direction": self.__parse_direction(route.Direction),
+                    "Direction": self.__decode_direction(route.Direction),
                     "OperatorIDs": ",".join([op.OperatorID for op in route.Operators]),
                     **self.flat_struct(stop, skip_fields=["Direction", "OperatorIDs"])    
                 })
@@ -252,7 +252,7 @@ class _bus_parsers(_parsers):
     def __flat_route_info(self, schedule: Schedule | DailySchedule) -> dict:
         return {
             **self.flat_struct(schedule, skip_fields=["Timetables", "Frequencys", "Direction"]),
-            "Direction": self.__parse_direction(schedule.Direction)
+            "Direction": self.__decode_direction(schedule.Direction)
         }
 
     def __parse_timtable(self, schedule: Schedule | DailySchedule, only_departure_station: bool = False) -> list:
