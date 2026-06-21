@@ -8,6 +8,7 @@ from typing import Literal, overload
 import msgspec, requests
 import pandas as pd
 import geopandas as gpd
+
 # Local imports
 from .authority import tdx_auth
 from .bike_parsers import _bike_parsers

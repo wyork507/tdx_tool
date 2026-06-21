@@ -17,37 +17,6 @@ class TrainTypeProperty(IntEnum):
     Holiday   = 1  # 節日/加班車
     Suspended = 2  # 停駛車次
 
-# ===============
-# MARK: - Network
-# ===============
-class LineBasic(ms.Struct, kw_only=True):
-    LineID: str
-    LineNo: Optional[int] = None 
-
-class Network(ms.Struct, kw_only=True):
-    NetworkID: str
-    NetworkName: I18n
-    OperatorCode: str
-    OperatorName: I18n
-    Lines: List[LineBasic] = []
-
-class NetworkV2(Network):
-    """
-    Metro
-    """
-    SrcUpdateTime: str
-    UpdateTime: str
-    VersionID: str
-
-class NetworkV3(ms.Struct, kw_only=True):
-    """
-    TRC, AFR
-    """
-    SrcUpdateTime: str
-    UpdateTime: str
-    Items: List[Network]
-    Count: Optional[int] = None
-
 # ======================
 # MARK: Line and Station
 # ======================
@@ -55,12 +24,22 @@ class StationOfLine(ms.Struct, kw_only=True):
     StationID: str
     Sequence: int
 
-class Line(LineBasic, kw_only=True):
+class LineBasic(ms.Struct, kw_only=True):
+    LineID: str
+    LineNo: Optional[int] = None 
     LineName: I18n
-    RailType: int
+    LineSectionName: I18n
+    LineColor: Optional[str] = None  # 十六進位色碼 (Hex color code)，如 "#FF0000" 表示紅色
     IsBranch: bool  # 是否為支線
-    Stations: List[StationOfLine] = field(default_factory=list)
+
+class LineV2(LineBasic, kw_only=True):
+    SrcUpdateTime: str
     UpdateTime: str
+
+class LineV3(ms.Struct, kw_only=True):
+    SrcUpdateTime: str
+    UpdateTime: str
+    Items: List[LineBasic]
 
 class RailRoute(ms.Struct, kw_only=True):
     RouteID: str

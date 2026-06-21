@@ -12,9 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyproj.exceptions import CRSError
 # Local imports
 from .authority import tdx_auth
-from .utils import TDX_API_BASE as base_url
+from .utils import TDX_API_BASE as base_url, T
 
-T = TypeVar("T", bound=Struct)
 DataFrame = TypeVar("DataFrame", bound=pd.DataFrame|gpd.GeoDataFrame)
 
 class tdx_tool:

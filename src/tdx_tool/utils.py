@@ -2,7 +2,8 @@
 from dataclasses import dataclass
 from enum import Enum
 from functools import cached_property
-from typing import Optional, Literal, TypeVar
+from typing import Optional, Literal, TypeVar, overload
+from msgspec import Struct
 # Local imports
 from .bike_models import ServiceType
 from .common_models import I18n, PointPosition, Identity
@@ -10,7 +11,7 @@ from .common_models import I18n, PointPosition, Identity
 TDX_URL = "https://tdx.transportdata.tw"
 TDX_API_BASE = f"{TDX_URL}/api/basic/"
 TDX_AUTH = f"{TDX_URL}/auth/realms/TDXConnect/protocol/openid-connect/token"
-
+T = TypeVar("T", bound=Struct)
 
 
 ZONES: dict[str, Identity] = {
@@ -244,8 +245,6 @@ class BikeRegion(Enum):
         match self:
             case BikeRegion.Changhua | BikeRegion.Yunlin:
                 return [ServiceType.Moovo]
-            case BikeRegion.Taipei:
-                return [ServiceType.YouBike2, ServiceType.Moovo]
             case _:
                 return [ServiceType.YouBike2]
     
@@ -253,6 +252,27 @@ class BikeRegion(Enum):
     def api_tag(self) -> str:
         """Return the api_tag used in the TDX API endpoint URLs for this region."""
         return self.value.api_tag
+
+class RailAPI(Enum):
+    """
+    A enum for rail API types in Taiwan.
+    """
+    TRC = "/v3/Rail/TRA"
+    AFR = "/v3/Rail/AFR"
+    HSR = "/v2/Rail/THSR"
+    Metro = "/v2/Rail/Metro"
+
+    @overload
+    def __call__(self) -> str: ...
+    @overload
+    def __call__(self, operator: "RailwayOperator") -> list[str]: ...
+
+    def __call__(self, operator: "RailwayOperator | None" = None) -> str | list[str]:
+        """Return the API prefix for the railway operator, used in the TDX API endpoint URLs."""
+        if self is RailAPI.Metro and operator is not None:
+            return [f"{self.value}/{api_tag}" for api_tag in operator.api_tags_including_sub]
+        else:
+            return self.value
 
 class RailwayOperator(Enum):
     """
@@ -326,6 +346,19 @@ class RailwayOperator(Enum):
             return True
         else:
             return False
+    
+    @property
+    def api(self) -> RailAPI:
+        """Return the API prefix for the railway operator, used in the TDX API endpoint URLs."""
+        match self:
+            case RailwayOperator.INTER_TRC:
+                return RailAPI.TRC
+            case RailwayOperator.INTER_AFR:
+                return RailAPI.AFR
+            case RailwayOperator.INTER_HSR:
+                return RailAPI.HSR
+            case _:
+                return RailAPI.Metro
 
     @property
     def subRailSystem(self) -> dict[str, str] | None:
@@ -359,6 +392,17 @@ class RailwayOperator(Enum):
                 }
             case _:
                 return None
+    
+    @property
+    def api_tags_including_sub(self) -> list[str]:
+        """
+        Return a list of api_tags for the railway operator, including its sub-rail systems if it's a metro operator.
+        """
+        subs = self.subRailSystem
+        if subs is not None:
+            return [self.api_tag] + list(subs.keys())
+        else:
+            return [self.api_tag]
 
 class RailwayRegion(Enum):
     """

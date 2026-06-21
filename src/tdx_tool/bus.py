@@ -6,8 +6,8 @@ import msgspec, requests
 import pandas as pd
 import geopandas as gpd
 
-from tdx_tool.authority import tdx_auth
 # Local imports
+from .authority import tdx_auth
 from .bus_parsers import _bus_parsers
 from .bus_models import RouteStops, Station, Operator, Schedule, DailySchedule, Alert
 from .core import tdx_tool
