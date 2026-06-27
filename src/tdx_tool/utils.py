@@ -403,6 +403,26 @@ class RailwayOperator(Enum):
             return [self.api_tag] + list(subs.keys())
         else:
             return [self.api_tag]
+    
+    @staticmethod
+    def all_cases(version: Literal["v2", "v3"] | None = None) -> list["RailwayOperator"]:
+        """
+        Returns a list of all railway operators, optionally filtered by API version.
+
+        Parameters
+        ----------
+        version: Literal["v2", "v3"] | None
+            If specified, filters the railway operators to only those that are available in the given API version.
+            If `None`, returns all railway operators regardless of API version.
+        """
+        match version:
+            case "v2":
+                return [operator for operator in RailwayOperator.all_cases() if operator.api in [RailAPI.HSR, RailAPI.Metro]]
+            case "v3":
+                return [operator for operator in RailwayOperator.all_cases() if operator.api in [RailAPI.TRC, RailAPI.AFR]]
+            case _:
+                return list(RailwayOperator)
+        
 
 class RailwayRegion(Enum):
     """

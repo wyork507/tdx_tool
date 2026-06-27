@@ -36,6 +36,17 @@ class LineV2(LineBasic, kw_only=True):
     SrcUpdateTime: str
     UpdateTime: str
 
+    @staticmethod
+    def HSR() -> "LineV2":
+        return LineV2(
+                LineID="HSR",
+                LineName=I18n("臺灣高鐵"),
+                LineSectionName=I18n("南港-左營"),
+                IsBranch=False,
+                SrcUpdateTime="2026-06-21T16:44:06+08:00",
+                UpdateTime="2026-06-21T16:44:06+08:00"
+        )
+
 class LineV3(ms.Struct, kw_only=True):
     SrcUpdateTime: str
     UpdateTime: str
