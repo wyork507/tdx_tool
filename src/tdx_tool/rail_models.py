@@ -52,6 +52,24 @@ class LineV3(ms.Struct, kw_only=True):
     UpdateTime: str
     Items: List[LineBasic]
 
+class StationBasic(ms.Struct, kw_only=True):
+    StationUID: str
+    StationID: str
+    StationClass: Optional[str] = None
+    StationName: I18n
+    StationAddress: Optional[str] = None
+    StationPosition: PointPosition
+
+class StationV2(StationBasic, kw_only=True):
+    BikeAllowOnHoliday: Optional[bool] = None
+    SrcUpdateTime: str
+    UpdateTime: str
+
+class StationV3(ms.Struct, kw_only=True):
+    SrcUpdateTime: str
+    UpdateTime: str
+    Stations: List[StationBasic]
+
 class RailRoute(ms.Struct, kw_only=True):
     RouteID: str
     LineID: str

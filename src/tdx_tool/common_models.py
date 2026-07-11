@@ -36,7 +36,7 @@ class I18n:
 class PointPosition:
     PositionLon: float
     PositionLat: float
-    GeoHash: str
+    GeoHash: Optional[str] = None
 
     def flat(self, prefix: str | None = None) -> dict[str, float | str]:
         if prefix is None:
@@ -44,7 +44,7 @@ class PointPosition:
         return {
             f"{prefix}PositionLon": self.PositionLon,
             f"{prefix}PositionLat": self.PositionLat,
-            f"{prefix}GeoHash": self.GeoHash
+            f"{prefix}GeoHash": self.GeoHash or ""
         }
     
     @property
@@ -55,7 +55,7 @@ class ServiceStatus(StrEnum):
     Cancel = "停駛"
     Normal = "正常"
     Errors = "異常"
-    Addion = "加班"
+    Extras = "加班"
 
     @classmethod
     def from_alert(cls, alert_status: int) -> Optional["ServiceStatus"]:
@@ -92,7 +92,7 @@ class ServiceStatus(StrEnum):
         match self:
             case ServiceStatus.Normal:
                 return 0
-            case ServiceStatus.Addion:
+            case ServiceStatus.Extras:
                 return 1
             case ServiceStatus.Cancel:
                 return 2

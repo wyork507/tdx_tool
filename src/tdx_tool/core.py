@@ -183,7 +183,6 @@ class tdx_tool:
         prefix: str,
         params: dict,
         decoder: Callable[[Response], list[T]],
-        parser: None = None,
     ) -> list[T]:
         ...
 
@@ -193,8 +192,20 @@ class tdx_tool:
         prefix: str,
         params: dict,
         decoder: Callable[[Response], list[T]],
+        *,
         parser: Callable[[list[T]], DataFrame],
     ) -> DataFrame:
+        ...
+    
+    @overload
+    def _fetch_combined_data(
+        self,
+        prefix: str,
+        params: dict,
+        decoder: Callable[[Response], list[T]],
+        *,
+        middle: list[str] | bool,
+    ) -> list[T]:
         ...
     
     def _fetch_combined_data(
@@ -202,6 +213,8 @@ class tdx_tool:
         prefix: str,
         params: dict,
         decoder: Callable[[Response], list[T]],
+        *,
+        middle: list[str] | bool | None = None,
         parser: Callable[[list[T]], DataFrame] | None = None
     ) -> list[T] | DataFrame:
         """
@@ -217,8 +230,10 @@ class tdx_tool:
         params: dict
             A dictionary of query parameters to include in the API request
         decoder: Callable[[Response], list[T]]
-            A function to decode the API response into a pandas DataFrame
-        parser: Callable[[list[T]], DataFrame] | None
+            A function that decodes an API response into a list of records.
+        middle: list[str] | Literal[False] | None, default=None
+            A list of strings to replace the placeholder in the prefix, or None to use the default middle parts
+        parser: Callable[[list[T]], DataFrame] | None, default=None
             A function to parse the decoded data into a pandas DataFrame, or None to return the raw decoded data
         """
         data: list[T] = []
@@ -231,7 +246,13 @@ class tdx_tool:
             count = 0
             
             while True:
-                suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
+                if prefix.endswith("/") and middle_part is not None:
+                    suffix_url = f"{prefix}{middle_part}?%24format=JSON"
+                else:
+                    if middle_part:
+                        suffix_url = f"{prefix}/{middle_part}?%24format=JSON"
+                    else:
+                        suffix_url = f"{prefix}?%24format=JSON"
                 # Add pagination parameters
                 
                 self.logger.debug(f"Fetching data from URL: {suffix_url} (skip={skip}, top={top_size})")
@@ -258,11 +279,19 @@ class tdx_tool:
             
             return result
         
+        def get_middle_parts() -> list[str]:
+            if middle is None or middle is True:
+                return self._url_middle_part() # Use the default middle parts
+            elif middle is False:
+                return [""] # No middle part, just use the prefix
+            else:
+                return middle # Use the provided middle parts
+
         # Use ThreadPoolExecutor to fetch data concurrently
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {
                 executor.submit(fetch_single_middle_part_with_pagination, middle_part): middle_part 
-                for middle_part in self._url_middle_part()
+                for middle_part in get_middle_parts()
             }
             
             for future in as_completed(futures):

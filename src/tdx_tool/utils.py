@@ -260,7 +260,7 @@ class RailAPI(Enum):
     TRC = "/v3/Rail/TRA"
     AFR = "/v3/Rail/AFR"
     HSR = "/v2/Rail/THSR"
-    Metro = "/v2/Rail/Metro"
+    METRO = "/v2/Rail/Metro"
 
     @overload
     def __call__(self) -> str: ...
@@ -269,7 +269,7 @@ class RailAPI(Enum):
 
     def __call__(self, operator: "RailwayOperator | None" = None) -> str | list[str]:
         """Return the API prefix for the railway operator, used in the TDX API endpoint URLs."""
-        if self is RailAPI.Metro and operator is not None:
+        if self is RailAPI.METRO and operator is not None:
             return [f"{self.value}/{api_tag}" for api_tag in operator.api_tags_including_sub]
         else:
             return self.value
@@ -358,7 +358,7 @@ class RailwayOperator(Enum):
             case RailwayOperator.INTER_HSR:
                 return RailAPI.HSR
             case _:
-                return RailAPI.Metro
+                return RailAPI.METRO
 
     @property
     def subRailSystem(self) -> dict[str, str] | None:
@@ -417,7 +417,7 @@ class RailwayOperator(Enum):
         """
         match version:
             case "v2":
-                return [operator for operator in RailwayOperator.all_cases() if operator.api in [RailAPI.HSR, RailAPI.Metro]]
+                return [operator for operator in RailwayOperator.all_cases() if operator.api in [RailAPI.HSR, RailAPI.METRO]]
             case "v3":
                 return [operator for operator in RailwayOperator.all_cases() if operator.api in [RailAPI.TRC, RailAPI.AFR]]
             case _:
