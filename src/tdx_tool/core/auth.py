@@ -1,13 +1,13 @@
-# Dependencies
+#Dependencies
 from logging import Logger
 from typing import Any
 from requests import post
 from datetime import datetime
 from threading import Lock
 # Local imports
-from .utils import TDX_AUTH
+from .constants import TDX_URL_AUTH
 
-class _tdx_auth_meta(type):
+class _AuthMeta(type):
     _instances = {}
     _lock = Lock()
     def __call__(cls, *args, **kwargs):
@@ -20,7 +20,7 @@ class _tdx_auth_meta(type):
                 cls._instances[key] = instance
             return cls._instances[key]
 
-class tdx_auth(metaclass=_tdx_auth_meta):
+class Auth(metaclass=_AuthMeta):
     """
     A class that manages TDX API authentication tokens with automatic refresh and caching. If you create multiple
     instances of tdx_auth with the same client_id, they will share the same token cache and refresh logic.
@@ -85,7 +85,7 @@ class tdx_auth(metaclass=_tdx_auth_meta):
         object.__setattr__(self, "_token_lock", Lock())
     
     @classmethod
-    def without_logger(cls, client_id: str, client_key: str) -> "tdx_auth":
+    def without_logger(cls, client_id: str, client_key: str) -> "Auth":
         """
         Alternative constructor that creates a tdx_auth instance without requiring a logger.
 
@@ -140,7 +140,7 @@ class tdx_auth(metaclass=_tdx_auth_meta):
             "client_id": self.client_id,
             "client_secret": self.client_key
         }
-        response = post(TDX_AUTH, data=data, headers=headers, timeout=10)
+        response = post(TDX_URL_AUTH, data=data, headers=headers, timeout=10)
         response.raise_for_status()
         # If successful, update the token and expiration time in the cache
         token_data = response.json()
@@ -185,6 +185,10 @@ class tdx_auth(metaclass=_tdx_auth_meta):
         if self._token is None:
             raise RuntimeError("TDXAuth token is not available.")
         return self._token
+
+    @property
+    def header(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token}"}
     
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("tdx_auth attributes are read-only.")

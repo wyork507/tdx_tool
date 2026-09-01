@@ -4,7 +4,8 @@ from enum import IntEnum, StrEnum
 from typing import List, Optional
 import msgspec as ms
 # Local imports
-from .common_models import I18n, PointPosition, Operator, ServiceDay, SpecialDay
+from ...core import I18n, PointPosition
+from ...core.models import Operator, ServiceDay, SpecialDay
 
 class Direction(IntEnum):
     Forward  = 0    # 往程

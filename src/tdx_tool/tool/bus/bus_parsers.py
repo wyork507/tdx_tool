@@ -7,7 +7,8 @@ import geopandas as gpd
 from shapely import LineString
 import polyline
 # Local imports
-from .common_parsers import _parsers, with_tqdm
+from ...core.parser import Parser
+from ...core.util import with_tqdm
 from .bus_models import (
     Route, RouteShape,
     Station, StationFraction,
@@ -17,10 +18,9 @@ from .bus_models import (
     DailySchedule, Schedule
 )
 
-
-class _bus_parsers(_parsers):
-    def __init__(self, logger: Logger):
-        super().__init__(logger)
+class BusParsers(Parser):
+    def __init__(self, crs: str, logger: Logger | None = None):
+        super().__init__(crs, logger)
     
     def __decode_direction(self, direction: int) -> str | None:
         from .bus_models import Direction
@@ -38,7 +38,7 @@ class _bus_parsers(_parsers):
         except Exception: return None
     
     def __decode_status(self, status: int, source: Literal["Alert", "ServiceStatus"]) -> str | None:
-        from .bus_models import ServiceStatus
+        from ...core.models import ServiceStatus
         status_case: ServiceStatus | None
         match source:
             case "Alert":
@@ -53,7 +53,7 @@ class _bus_parsers(_parsers):
             return status_case.value
     
     def __decode_error_cause(self, error_cause: int) -> str | None:
-        from .bus_models import ServiceStatus
+        from ...core.models import ServiceStatus
         try: return ServiceStatus(error_cause).name
         except Exception: return None
     

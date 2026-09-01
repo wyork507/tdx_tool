@@ -3,7 +3,7 @@ from enum import IntEnum
 from typing import Optional
 import msgspec as ms
 # Local imports
-from .common_models import I18n, PointPosition
+from ...core import I18n, PointPosition
 
 class ServiceType(IntEnum):
     YouBike1 = 1 # YouBike1.0 (已退役)

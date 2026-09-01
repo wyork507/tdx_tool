@@ -1,30 +1,33 @@
 # Dependencies
-from datetime import datetime, time, date
-from typing import overload
 from logging import Logger
-from math import 
 import pandas as pd
 import geopandas as gpd
-import shapely
 # Local imports
+from ...core.parser import Parser
 from .bike_models import Station, Availability
-from .common_parsers import _parsers
 
-class _bike_parsers(_parsers):
-    def __init__(self, logger: Logger):
-        super().__init__(logger)
+class BikeParsers(Parser):
+    def __init__(self, crs: str, logger: Logger | None = None):
+        super().__init__(crs, logger)
         
     # =====================
     # MARK: Stations Parser
     # =====================
 
-    def parse_stations(self, stations: list[Station]) -> pd.DataFrame:
+    def parse_stations(self, stations: list[Station]) -> gpd.GeoDataFrame:
         """
+        Parse a list of Station objects into a pandas DataFrame.
         """
         data = []
         for station in stations:
             data.append(self.flat_struct(station))
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data).sort_values("StationUID").reset_index(drop=True)
+        coor = df[["PositionLon", "PositionLat"]]
+        return gpd.GeoDataFrame(
+            df.drop(columns=["PositionLon", "PositionLat"]),
+            geometry = gpd.points_from_xy(coor["PositionLon"], coor["PositionLat"]),
+            crs = self.crs
+        )
     
     # =========================
     # MARK: Availability Parser
@@ -32,6 +35,7 @@ class _bike_parsers(_parsers):
 
     def parse_availability(self, availabilities: list[Availability]) -> pd.DataFrame:
         """
+        Parse a list of Availability objects into a pandas DataFrame.
         """
         data = []
         for availablility in availabilities:

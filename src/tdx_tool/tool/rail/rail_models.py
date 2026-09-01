@@ -4,8 +4,8 @@ from enum import IntEnum
 from typing import List, Optional
 import msgspec as ms
 # Local imports
-from .common_models import I18n, PointPosition, ServiceDay, SpecialDay
-from .utils import RailwayOperator
+from ...core import I18n, PointPosition, RailOperator
+from ...core.models import ServiceDay, SpecialDay
 
 class RailDirection(IntEnum):
     SouthboundOrInner = 0  # 南下 / 內圈
